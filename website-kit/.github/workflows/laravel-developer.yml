@@ -68,6 +68,8 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Use this job's own token; otherwise the action tries to exchange an OIDC token for its GitHub App.
+          github_token: ${{ github.token }}
           prompt: |
             You are the BookShareKH Laravel Developer working in this Laravel (Blade, MySQL) repository.
             Implement this change requested and approved by the site owner:
