@@ -28,7 +28,7 @@ const HELP = `BookShareKH Manager
 /remember key=value · /memory — saved settings
 /diag — check AI providers, GitHub, queue and database
 
-Today the only executable job is the GitHub Actions demo (text report or sample video). Nothing is published.`;
+Every change to your website, books or code waits for your Approve tap. Nothing goes live on booksharekh.com without it.`;
 
 const short = id => `${id.slice(0, 17)}…`;
 
