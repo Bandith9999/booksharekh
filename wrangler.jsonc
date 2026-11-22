@@ -41,16 +41,16 @@
 		"WEBSITE_REPO": "",
 		"LARAVEL_API_URL": "",
 
-		// $0 mode: every agent uses the default tier, Gemini on Google's free API tier.
-		// The other tiers (AI_FAST_*, AI_REVIEW_*, AI_CODE_*) are unset, so they inherit the default.
-		// Override one agent from Telegram with /agent <name> set provider=google model=<free model>.
-		// Keys are Cloudflare secrets, never vars: GEMINI_API_KEY (from a Google project WITHOUT billing).
-		"AI_DEFAULT_PROVIDER": "google",
-		"AI_DEFAULT_MODEL": "gemini-3.8-flash",
+		// Planning AI: Claude Sonnet 5.5 via the Anthropic API (owner decision 2026-11-22, ~ $0.01 per plan).
+		// Key: Cloudflare secret ANTHROPIC_API_KEY. Every tier inherits this default.
+		// $0 alternative (README section I): AI_DEFAULT_PROVIDER=google, AI_DEFAULT_MODEL=gemini-3.8-flash,
+		// AI_PAID_ENABLED=false, plus the secret GEMINI_API_KEY.
+		"AI_DEFAULT_PROVIDER": "anthropic",
+		"AI_DEFAULT_MODEL": "claude-sonnet-5-5",
 
-		// Paid AI lock. While "false", only these free Gemini models (and the mock provider) can run;
-		// Anthropic, OpenAI and non-free Gemini models are refused. Only the owner should change this.
-		"AI_PAID_ENABLED": "false",
+		// Paid AI lock. "true" = unlocked by the owner for Claude. When "false", only the free Gemini models
+		// below (and mock) can run. Only the owner should change this.
+		"AI_PAID_ENABLED": "true",
 		"AI_FREE_MODELS": "gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash-lite",
 		// json_schema (default) | openapi | prompt. Switch if Gemini rejects the schema field; output is
 		// validated in the Worker in every mode.
@@ -59,14 +59,15 @@
 		// Runtime provider fallback is off (and a paid fallback is refused while paid AI is locked).
 		"AI_FALLBACK_ENABLED": "false",
 
-		// Free-tier limits. Keep them BELOW the RPM/RPD shown for your project in AI Studio
-		// (https://aistudio.google.com/rate-limit). Daily limits pause tasks; per-minute limits retry later.
+		// Spending cap. 100,000 tokens/day on Claude Sonnet 5.5 is at most about $1/day even if every token
+		// were output ($10 per million). Daily limits pause tasks; per-minute limits retry later.
+		// Also set a monthly limit in the Claude Console (Plans & Billing) as a second guard.
 		"AI_MAX_REQUESTS_PER_MINUTE": "5",
-		"AI_MAX_REQUESTS_PER_DAY": "100",
+		"AI_MAX_REQUESTS_PER_DAY": "60",
 		"DAILY_TASK_LIMIT": "20",
 		"TASK_RATE_LIMIT_PER_HOUR": "10",
-		"TASK_TOKEN_BUDGET": "30000",
-		"DAILY_TOKEN_BUDGET": "300000",
+		"TASK_TOKEN_BUDGET": "20000",
+		"DAILY_TOKEN_BUDGET": "100000",
 		"APPROVAL_TTL_HOURS": "24"
 	}
 }

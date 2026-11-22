@@ -130,7 +130,7 @@ Send:
 
 ## G. AI providers and models
 
-**Default: $0 mode.** All seven agents use Google Gemini `gemini-3.8-flash` on the free API tier, and paid AI is locked (see section I).
+**Current setting (owner decision, 2026-11-22): Claude Sonnet 5.5** plans tasks, with paid AI unlocked and a cap of 100,000 tokens a day (at most about $1). The $0 alternative is Gemini on the free tier with paid AI locked (see section I).
 
 Each agent uses a **tier**, and each tier maps to a provider and model in `wrangler.jsonc`. In $0 mode only the default tier is set, so every tier inherits it:
 
