@@ -152,6 +152,17 @@ test('book requests: silent first poll, then alerts; Find → legal search → i
   assert.match(sent(calls).map(m => m.text).join('\n'), /Book request #5 marked done/);
 });
 
+test('/requests lists pending requests made before the watcher started, with buttons', async () => {
+  const env = apiEnv();
+  const { calls } = setup({ files: {}, requests: [{ id: 3, book_title: 'Done one', status: 'done' }, { id: 4, book_title: 'testing', author: 'Testing', status: 'pending' }] });
+  await worker.scheduled({}, env, {});
+  await telegram(env, msg('/requests'));
+  const out = sent(calls).at(-1);
+  assert.match(out.text, /📚 New book request #4\ntesting — Testing/);
+  assert.deepEqual(out.reply_markup.inline_keyboard[0].map(b => b.callback_data), ['rq:4', 'rr:4']);
+  assert.equal(sent(calls).filter(m => /Done one/.test(m.text)).length, 0, 'only pending');
+});
+
 test('a request with no legal copy says so; reject marks it rejected', async () => {
   const env = apiEnv();
   const state = { files: {}, requests: [{ id: 6, book_title: 'A 2024 Bestseller', status: 'pending' }] };

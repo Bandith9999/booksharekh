@@ -11,6 +11,7 @@ export const T = {
 /task <សំណើ> — រៀបចំការងារ
 /develop <ការកែ> — កែកូដវេបសាយ (PR)
 /research <ចំណងជើង> — រកសៀវភៅ public domain
+/requests — សំណើសៀវភៅដែលកំពុងរង់ចាំ
 /books [latest N | search <ចំណងជើង>] — សៀវភៅលើវេបសាយ
 /website — ពិនិត្យវេបសាយ
 /status · /pending · /taskstatus <id>
@@ -79,6 +80,7 @@ export const T = {
      b.dups ? `⚠️ មានសៀវភៅនេះរួចហើយ (#${b.dups}) — នឹងមិន publish ទេ។` : ''].filter(Boolean).join('\n')),
   published: (env, p, bookId, slug, requestNote) => pick(env, `✅ Published "${p.title}" by ${p.author} on booksharekh.com (book #${bookId}${slug ? `, /${slug}` : ''}).${requestNote}`, `✅ បានផ្សព្វផ្សាយ "${p.title}" (book #${bookId})។${requestNote}`),
   requestDone: (env, id) => pick(env, `\nBook request #${id} marked done.`, ` សំណើ #${id} រួចរាល់។`),
+  noPending: env => pick(env, 'No pending book requests.', 'មិនមានសំណើសៀវភៅរង់ចាំទេ។'),
   requestRejected: (env, id) => pick(env, `Book request #${id} rejected.`, `🚫 សំណើ #${id} ត្រូវបានបដិសេធ។`),
   booksHeading: (env, n) => pick(env, `Latest ${n} books:`, `សៀវភៅថ្មីៗ ${n}:`),
   searchHeading: (env, q) => pick(env, `Books matching "${q}":`, `លទ្ធផល "${q}":`),

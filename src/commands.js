@@ -8,7 +8,7 @@ import { PROVIDER_NAMES, getProvider, normalizeProvider } from './ai/provider-fa
 import { approveStep, cancelTask, createBookImport, createTask, legacyDecision, rejectStep, resumeTask } from './orchestration/engine.js';
 import { getCandidate, searchPublicDomain } from './books/gutenberg.js';
 import { T, tr } from './i18n.js';
-import { candidatesMessage, findForRequest, rejectRequest } from './books/requests.js';
+import { candidatesMessage, findForRequest, recentPendingRequests, rejectRequest, requestKeyboard } from './books/requests.js';
 import { budgets, tokensUsed } from './orchestration/budget.js';
 import { WORKFLOWS, WORKFLOW_FILE, githubHeaders, workflowUrl } from './orchestration/github.js';
 import { checkWebsite, formatHealth } from './website/health.js';
@@ -20,6 +20,7 @@ const HELP = `BookShareKH Manager
 /website — live site health and security check
 /books [latest N | search <title>] — books from the website API
 /research <title> — find a public-domain copy (Project Gutenberg) and prepare a draft
+/requests — pending book requests from visitors
 /taskstatus <task-id> — steps, approvals, tokens, GitHub run
 /approve <task-id> · /reject <task-id> — decide a waiting task
 /cancel <task-id> — cancel a task that has not started on GitHub
@@ -290,6 +291,17 @@ export async function handleMessage(env, m) {
         }
         const n = Number(rest[0] || (sub && sub !== 'latest' ? sub : 5)) || 5;
         return reply(env, chat, formatBooks(await latestBooks(env, n), T.booksHeading(env, n), T.noBooks(env)));
+      } catch (e) {
+        if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
+        throw e;
+      }
+    }
+    case 'requests': {
+      try {
+        const pending = await recentPendingRequests(env);
+        if (!pending.length) return reply(env, chat, T.noPending(env));
+        for (const r of pending) await reply(env, chat, T.requestAlert(env, r), { reply_markup: requestKeyboard(r.id, env) });
+        return;
       } catch (e) {
         if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
         throw e;

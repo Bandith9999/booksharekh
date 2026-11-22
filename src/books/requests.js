@@ -63,3 +63,10 @@ export async function rejectRequest(env, requestId, userId) {
   await updateRequest(env, requestId, { status: 'rejected', note: 'Rejected by the owner' });
   await audit(env, null, 'BOOK_REQUEST_REJECTED', userId, `#${requestId}`);
 }
+
+// /requests: pending requests near the newest one (covers requests made before the watcher started).
+export async function recentPendingRequests(env, limit = 10) {
+  const cursor = Number(await getSetting(env, CURSOR) ?? 0);
+  const { data = [] } = await listRequests(env, Math.max(0, cursor - 40));
+  return data.filter(r => r.status === 'pending').slice(-limit).reverse();
+}
