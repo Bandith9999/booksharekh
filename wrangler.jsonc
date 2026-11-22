@@ -40,6 +40,8 @@
 		// LARAVEL_API_URL = base URL of the restricted AI API (empty until installed); its token is the
 		// secret LARAVEL_API_TOKEN.
 		"WEBSITE_URL": "https://booksharekh.com",
+		// Book searches return only editions in these languages (2-letter codes).
+		"BOOK_LANGUAGES": "en",
 		"WEBSITE_REPO": "booksharekh-website",
 		"LARAVEL_API_URL": "https://booksharekh.com",
 

@@ -54,7 +54,7 @@ export async function findForRequest(env, requestId, userId) {
   const r = await getRequest(env, requestId);
   await updateRequest(env, requestId, { status: 'approved', note: 'Searching public-domain sources' });
   await audit(env, null, 'BOOK_REQUEST_APPROVED', userId, `#${requestId} ${clamp(r.book_title, 100)}`);
-  const books = await searchPublicDomain(`${r.book_title} ${r.author || ''}`.trim());
+  const books = await searchPublicDomain(`${r.book_title} ${r.author || ''}`.trim(), { languages: env.BOOK_LANGUAGES });
   return candidatesMessage(r.book_title, books, requestId);
 }
 

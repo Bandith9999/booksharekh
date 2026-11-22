@@ -8,6 +8,7 @@ import { approveButton, auditEvents, drain, lastText, latestTask, makeEnv, mockF
 const BOOKS = {
   2701: { id: 2701, title: 'Moby Dick; Or, The Whale', authors: [{ name: 'Melville, Herman' }], subjects: ['Whaling -- Fiction', 'Sea stories'], languages: ['en'],
     copyright: false, summaries: ['A whaling voyage.'], formats: { 'application/epub+zip': 'http://www.gutenberg.org/ebooks/2701.epub3.images', 'image/jpeg': 'http://www.gutenberg.org/cache/epub/2701/pg2701.cover.medium.jpg' } },
+  12: { id: 12, title: 'Moby Dick (French)', authors: [{ name: 'Melville, Herman' }], languages: ['fr'], copyright: false, formats: { 'application/epub+zip': 'https://www.gutenberg.org/ebooks/12.epub' } },
   9: { id: 9, title: 'Still In Copyright', authors: [{ name: 'Someone' }], languages: ['en'], copyright: true, formats: { 'application/epub+zip': 'https://www.gutenberg.org/ebooks/9.epub' } },
   10: { id: 10, title: 'Text Only', authors: [], languages: ['en'], copyright: false, formats: { 'text/plain': 'https://www.gutenberg.org/ebooks/10.txt' } },
 };
@@ -53,7 +54,8 @@ test('/research offers only public-domain titles that have an EPUB', async () =>
   await telegram(env, msg('/research moby dick'));
   const out = sent(calls).at(-1);
   assert.match(out.text, /1\. Moby Dick; Or, The Whale — Herman Melville \(en\)\n   https:\/\/www\.gutenberg\.org\/ebooks\/2701/);
-  assert.doesNotMatch(out.text, /Still In Copyright|Text Only/);
+  assert.doesNotMatch(out.text, /Still In Copyright|Text Only|French/);
+  assert.equal(new URL(calls.find(c => c.url.includes('gutendex')).url).searchParams.get('languages'), 'en', 'asks for English editions');
   assert.deepEqual(out.reply_markup.inline_keyboard.flat().map(b => b.callback_data), ['bi:2701:0']);
 });
 

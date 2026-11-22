@@ -297,7 +297,7 @@ export async function handleMessage(env, m) {
     }
     case 'research': {
       if (!c.args) return reply(env, chat, 'Use: /research Pride and Prejudice');
-      const m = candidatesMessage(c.args, await searchPublicDomain(c.args));
+      const m = candidatesMessage(c.args, await searchPublicDomain(c.args, { languages: env.BOOK_LANGUAGES }));
       return reply(env, chat, m.text, m.reply_markup ? { reply_markup: m.reply_markup } : {});
     }
     case 'agents': return reply(env, chat, await agentsText(env));

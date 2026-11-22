@@ -45,9 +45,12 @@ async function getJson(url) {
   return r.json();
 }
 
-export async function searchPublicDomain(query, { limit = 3 } = {}) {
-  const body = await getJson(`${API}/?search=${encodeURIComponent(clamp(query, 120))}`);
-  return (body?.results || []).map(toCandidate).filter(c => c?.publicDomain && c.epubUrl).slice(0, limit);
+// English editions only by default (BOOK_LANGUAGES in wrangler.jsonc, e.g. "en" or "en,fr").
+export async function searchPublicDomain(query, { limit = 3, languages = 'en' } = {}) {
+  const langs = String(languages || 'en').split(',').map(l => l.trim().toLowerCase()).filter(l => /^[a-z]{2}$/.test(l));
+  const body = await getJson(`${API}/?search=${encodeURIComponent(clamp(query, 120))}&languages=${langs.join(',')}`);
+  return (body?.results || []).map(toCandidate)
+    .filter(c => c?.publicDomain && c.epubUrl && c.languages.some(l => langs.includes(l))).slice(0, limit);
 }
 
 export async function getCandidate(id) {
