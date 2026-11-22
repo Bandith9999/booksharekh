@@ -15,6 +15,7 @@ import { checkWebsite, formatHealth } from './website/health.js';
 import { WebsiteApiError, apiConfigured, apiHealth, formatBooks, latestBooks, searchBooks } from './website/laravel-api.js';
 import { decideTopup, pendingTopups, sendTopupAlert } from './website/topups.js';
 import { usersSummary } from './website/users.js';
+import { sendSamples } from './samples.js';
 
 const HELP = `BookShareKH Manager
 /task <request> — plan a task (approval needed before anything runs)
@@ -310,6 +311,7 @@ export async function handleMessage(env, m) {
         throw e;
       }
     }
+    case 'preview': return sendSamples(env, chat);
     case 'users': {
       try { return reply(env, chat, await usersSummary(env)); } catch (e) {
         if (e instanceof WebsiteApiError) return reply(env, chat, e.message);

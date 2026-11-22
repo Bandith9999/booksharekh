@@ -23,6 +23,7 @@ export const T = {
 /requests — សំណើសៀវភៅដែលកំពុងរង់ចាំ
 /topups — topup ដែលកំពុងរង់ចាំ
 /users — ចំនួនអ្នកប្រើ
+/preview — មើលគំរូ alert ទាំងអស់
 /books [latest N | search <ចំណងជើង>] — សៀវភៅលើវេបសាយ
 /website — ពិនិត្យវេបសាយ
 /deploy — ដាក់កូដដែលបាន merge ឲ្យដំណើរការលើវេបសាយ

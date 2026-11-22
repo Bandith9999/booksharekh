@@ -65,3 +65,20 @@ test('/users shows the total and the last 24 hours', async () => {
   assert.equal(s.state.asked[0].hours, '24');
   assert.equal(lastText(calls), '👥 សរុប 1,200 នាក់\n🆕 ថ្មី (24h): 1\n🔑 Login (24h): 2');
 });
+
+test('/preview sends a sample of every alert with inert buttons, owner only', async () => {
+  const e = env();
+  const calls = mockFetch([[/api\.telegram\.org/, () => Response.json({ ok: true, result: {} })]]);
+  await telegram(e, msg('/preview'));
+  const msgs = sent(calls);
+  assert.equal(msgs.length, 13, 'intro + 12 samples');
+  assert.match(msgs[0].text, /^🧪 Preview: 12 sample alerts/);
+  assert.match(msgs[1].text, /^\*\*\* បញ្ចូលប្រាក់ \*\*\*/);
+  assert.match(msgs[5].text, /^\*\*\* សមាជិកថ្មី \*\*\*\n🆕 lyly@example\.com · Lyly\.Hong/);
+  const buttons = msgs.flatMap(m => m.reply_markup?.inline_keyboard.flat() ?? []);
+  assert.ok(buttons.length >= 7 && buttons.every(b => b.callback_data === 'noop'), 'sample buttons do nothing');
+  assert.equal(calls.filter(c => !/api\.telegram\.org/.test(c.url)).length, 0, 'no website or GitHub calls');
+  const before = sent(calls).length;
+  await telegram(e, msg('/preview', 999));
+  assert.equal(sent(calls).length, before, 'other users get nothing');
+});
