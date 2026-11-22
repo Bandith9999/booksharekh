@@ -9,6 +9,7 @@ import { deployShaOf, prReviewText } from './orchestration/github.js';
 import { handleCallback, handleMessage } from './commands.js';
 import { handleQueueBatch } from './orchestration/queue-consumer.js';
 import { pollBookRequests } from './books/requests.js';
+import { pollTopups } from './website/topups.js';
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 
@@ -113,6 +114,7 @@ export default {
   },
   // Cron trigger (wrangler.jsonc): announce new booksharekh.com book requests in Telegram.
   async scheduled(event, env) {
+    try { await pollTopups(env); } catch (e) { console.error('top-up poll failed', String(e)); }
     try { await pollBookRequests(env); } catch (e) { console.error('book request poll failed', String(e)); }
   },
 };

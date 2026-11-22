@@ -12,6 +12,7 @@ export const T = {
 /develop <ការកែ> — កែកូដវេបសាយ (PR)
 /research <ចំណងជើង> — រកសៀវភៅ public domain
 /requests — សំណើសៀវភៅដែលកំពុងរង់ចាំ
+/topups — topup ដែលកំពុងរង់ចាំ
 /books [latest N | search <ចំណងជើង>] — សៀវភៅលើវេបសាយ
 /website — ពិនិត្យវេបសាយ
 /deploy — ដាក់កូដដែលបាន merge ឲ្យដំណើរការលើវេបសាយ
@@ -92,6 +93,20 @@ ${url}` : ''}`),
   deployNothing: env => pick(env, 'Nothing new to deploy: main has no commits.', 'មិនមានអ្វីថ្មីសម្រាប់ deploy ទេ។'),
   noPending: env => pick(env, 'No pending book requests.', 'មិនមានសំណើសៀវភៅរង់ចាំទេ។'),
   requestRejected: (env, id) => pick(env, `Book request #${id} rejected.`, `🚫 សំណើ #${id} ត្រូវបានបដិសេធ។`),
+
+  // Top-ups (money): show exactly what will be credited.
+  topupAlert: (env, t) => {
+    const lines = [`💰 Top-up #${t.id}`, `👤 ${t.user || '?'}`, `💵 ${t.amount} ${t.currency} · ${String(t.method || '').toUpperCase()}`,
+      t.transaction_id ? `🧾 ${t.transaction_id}` : '', t.notes ? `📝 ${t.notes}` : '', t.has_image ? '' : pick(env, '⚠️ No receipt image', '⚠️ គ្មានរូបវិក្កយបត្រ')];
+    return [...lines.filter(Boolean), '', pick(env, '👉 Approve and credit this balance?', '👉 បញ្ចូលលុយ?')].join('\n');
+  },
+  topupButtons: env => pick(env, { approve: '✅ Approve', reject: '❌ Reject' }, { approve: '✅ យល់ព្រម', reject: '❌ បដិសេធ' }),
+  topupApproved: (env, t, balance) => pick(env, `✅ Top-up #${t.id} approved: +${t.amount} ${t.currency} for ${t.user}. Balance: ${balance}`,
+    `✅ Topup #${t.id} +${t.amount} ${t.currency} · ${t.user} (សមតុល្យ ${balance})`),
+  topupRejected: (env, id) => pick(env, `❌ Top-up #${id} rejected. No balance added.`, `❌ Topup #${id} បានបដិសេធ`),
+  topupProblem: (env, id, msg) => pick(env, `⚠️ Top-up #${id}: ${msg}`, `⚠️ Topup #${id}: ${msg}`),
+  topupUnknown: env => pick(env, 'This top-up is no longer in my list. Send /topups to see pending ones.', 'រកមិនឃើញ។ សូមវាយ /topups'),
+  noTopups: env => pick(env, 'No pending top-ups.', 'គ្មាន topup រង់ចាំ'),
   booksHeading: (env, n) => pick(env, `Latest ${n} books:`, `សៀវភៅថ្មីៗ ${n}:`),
   searchHeading: (env, q) => pick(env, `Books matching "${q}":`, `លទ្ធផល "${q}":`),
   noBooks: env => pick(env, '(no books found)', '(រកមិនឃើញ)'),

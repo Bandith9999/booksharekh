@@ -13,6 +13,7 @@ import { budgets, tokensUsed } from './orchestration/budget.js';
 import { WORKFLOWS, WORKFLOW_FILE, deployPreviewText, githubHeaders, workflowUrl } from './orchestration/github.js';
 import { checkWebsite, formatHealth } from './website/health.js';
 import { WebsiteApiError, apiConfigured, apiHealth, formatBooks, latestBooks, searchBooks } from './website/laravel-api.js';
+import { decideTopup, pendingTopups, sendTopupAlert } from './website/topups.js';
 
 const HELP = `BookShareKH Manager
 /task <request> — plan a task (approval needed before anything runs)
@@ -308,6 +309,17 @@ export async function handleMessage(env, m) {
         throw e;
       }
     }
+    case 'topups': {
+      try {
+        const pending = await pendingTopups(env);
+        if (!pending.length) return reply(env, chat, T.noTopups(env));
+        for (const t of pending) await sendTopupAlert(env, t);
+        return;
+      } catch (e) {
+        if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
+        throw e;
+      }
+    }
     case 'requests': {
       try {
         const pending = await recentPendingRequests(env);
@@ -359,6 +371,7 @@ export async function handleCallback(env, q) {
       return reply(env, chat, msg.text, msg.reply_markup ? { reply_markup: msg.reply_markup } : {});
     }
     if ((m = /^rr:(\d{1,10})$/.exec(data))) { await rejectRequest(env, Number(m[1]), user); return reply(env, chat, T.requestRejected(env, m[1])); }
+    if ((m = /^t(a|r):(\d{1,10})$/.exec(data))) return reply(env, chat, await decideTopup(env, Number(m[2]), m[1] === 'a', user, q.message));
   } catch (e) {
     if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
     if (e instanceof SourceDownError) return reply(env, chat, T.sourceDown(env));
