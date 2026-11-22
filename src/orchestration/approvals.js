@@ -50,6 +50,22 @@ export async function consumeApproval(env, approvalId, payload) {
   return { ok: false, reason: `status_${row?.status ?? 'missing'}` };
 }
 
+// For a step about to execute: find its approval and consume it against the exact payload.
+// An approval already 'executing' means a redelivered message after a crash; the caller's
+// operations must be idempotent (they are: idempotency keys and server-side checks).
+export async function consumeStepApproval(env, agentTaskId, payload) {
+  const ap = await env.DB.prepare(`SELECT * FROM task_approvals WHERE agent_task_id=? AND status IN ('approved','executing')
+      ORDER BY requested_at DESC LIMIT 1`).bind(agentTaskId).first();
+  if (!ap) throw new Error('No valid owner approval for this step');
+  if (ap.status === 'approved') {
+    const c = await consumeApproval(env, ap.id, payload);
+    if (!c.ok) throw new Error(c.reason === 'payload_changed'
+      ? 'The action changed after it was approved, so the approval no longer applies.'
+      : `Approval cannot be used (${c.reason}).`);
+  }
+  return ap;
+}
+
 export async function finishApproval(env, approvalId, succeeded) {
   await env.DB.prepare("UPDATE task_approvals SET status=?, executed_at=CURRENT_TIMESTAMP WHERE id=? AND status='executing'")
     .bind(succeeded ? 'executed' : 'failed', approvalId).run();

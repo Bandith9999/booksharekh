@@ -9,6 +9,9 @@ import { AGENT_NAMES, PLAN_SCHEMA, QA_SCHEMA, RESEARCH_SCHEMA } from './schemas.
 // Tool catalog. A tool is usable only if an agent lists it and an action names it.
 export const TOOLS = {
   github_demo_workflow: { description: 'Dispatch the approved demo GitHub Actions job (report or sample video)', implemented: true },
+  gutenberg_download: { description: 'Search Project Gutenberg and download public-domain EPUB/cover files (gutenberg.org only)', implemented: true },
+  website_drafts: { description: 'Create private book drafts and upload files through the restricted Laravel API', implemented: true },
+  website_publish: { description: 'Publish an approved draft through the restricted Laravel API', implemented: true },
   open_library_search: { description: 'Search Open Library metadata', implemented: false, phase: 3 },
   google_books_search: { description: 'Search Google Books metadata', implemented: false, phase: 3 },
   epub_validate: { description: 'Run EPUBCheck / ebooklib checks in GitHub Actions', implemented: false, phase: 5 },
@@ -41,10 +44,18 @@ const LIST = [
   {
     name: 'book_researcher', title: 'Book Researcher', tier: 'fast', phase: 3,
     description: 'Finds bibliographic metadata, compares editions, records sources and rights evidence.',
-    allowedTools: ['open_library_search', 'google_books_search', 'github_demo_workflow'],
+    allowedTools: ['gutenberg_download', 'website_drafts', 'website_publish', 'open_library_search', 'google_books_search', 'github_demo_workflow'],
     limitations: ['Rights default to requires_verification.', 'Never treats downloadable as redistributable.'],
     maxAttempts: 3, allowFallback: true, maxOutputTokens: 2000, outputSchema: RESEARCH_SCHEMA,
-    actions: { demo_report_job: demoJob('text report') },
+    actions: {
+      demo_report_job: demoJob('text report'),
+      // Owner taps "Prepare draft": download a public-domain EPUB + cover, create a PRIVATE draft.
+      prepare_draft: { kind: 'book_draft', tool: 'gutenberg_download', requiresApproval: true, approvalAction: 'prepare_book_draft',
+        description: 'Download the public-domain EPUB and cover and create a private draft on booksharekh.com.' },
+      // Owner taps "Publish": approval bound to the draft's exact file fingerprints.
+      publish_book: { kind: 'book_publish', tool: 'website_publish', requiresApproval: true, approvalAction: 'publish_book',
+        description: 'Publish this book on booksharekh.com. It becomes visible to visitors.' },
+    },
   },
   {
     name: 'book_editor', title: 'EPUB/PDF Editor', tier: 'review', phase: 5, confidential: true,
@@ -113,10 +124,10 @@ export function validateRegistry() {
     if (!(a.maxAttempts >= 1 && a.maxAttempts <= 5)) errors.push(`${a.name}: maxAttempts out of range`);
     for (const t of a.allowedTools) if (!TOOLS[t]) errors.push(`${a.name}: unknown tool ${t}`);
     for (const [n, act] of Object.entries(a.actions)) {
-      if (!['ai', 'github_job'].includes(act.kind)) errors.push(`${a.name}.${n}: unknown action kind ${act.kind}`);
+      if (!['ai', 'github_job', 'book_draft', 'book_publish'].includes(act.kind)) errors.push(`${a.name}.${n}: unknown action kind ${act.kind}`);
       if (act.tool && !a.allowedTools.includes(act.tool)) errors.push(`${a.name}.${n}: tool ${act.tool} not in allowedTools`);
       if (act.tool && !TOOLS[act.tool]?.implemented) errors.push(`${a.name}.${n}: tool ${act.tool} not implemented`);
-      if (act.kind === 'github_job' && !act.requiresApproval) errors.push(`${a.name}.${n}: external job without approval`);
+      if (act.kind !== 'ai' && !act.requiresApproval) errors.push(`${a.name}.${n}: external action without approval`);
     }
   }
   for (const s of Object.values(DEMO_JOB_STEP)) if (!AGENTS[s.agent]?.actions[s.action]) errors.push(`demo step ${s.agent}.${s.action} missing`);

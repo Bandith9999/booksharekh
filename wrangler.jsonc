@@ -16,6 +16,8 @@
 	// Create both queues once before deploying:
 	//   npx wrangler queues create booksharekh-tasks
 	//   npx wrangler queues create booksharekh-tasks-dlq
+	// Every 15 minutes: announce new book requests from booksharekh.com (Workers Free includes cron triggers).
+	"triggers": { "crons": ["*/15 * * * *"] },
 	"queues": {
 		"producers": [{ "binding": "TASK_QUEUE", "queue": "booksharekh-tasks" }],
 		"consumers": [

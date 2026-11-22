@@ -258,3 +258,11 @@ Send `/diag` to the bot. It reports whether each secret is set (never its value)
 - `/books [latest N | search <title>]` reads book data through the restricted Laravel AI API, once that API is installed (`LARAVEL_API_URL` + secret `LARAVEL_API_TOKEN`).
 - `/develop <change>` makes the Manager plan the change and ask for your approval. Approving dispatches the **Laravel Developer** workflow in the private website repository: Claude Code edits the code on a new branch, then the workflow runs lint, tests and a secret scan and opens a pull request. Telegram gets the PR link and commit. **Nothing is deployed**; deployment will be a separate approval for that exact commit.
 - Setup of the website repository: see [website-kit/README.md](website-kit/README.md).
+
+### Books: requests, public-domain import, approved publishing
+- **Book requests:** every 15 minutes (cron trigger) the Worker checks booksharekh.com for new visitor requests and sends each one to Telegram with **[Find a legal copy] [Reject request]**. The first run only records the starting point.
+- **`/research <title>`**, or **Find a legal copy**, searches Project Gutenberg (via Gutendex). It offers only titles marked `copyright: false` (public domain in the USA) that have an EPUB.
+- **[Prepare draft]** downloads the EPUB and cover from **gutenberg.org only** (HTTPS, 40 MB limit). It then creates a **private draft** on the site with title, author, genres and description, and sends a preview.
+- **[Approve]** on the preview publishes the draft. The approval is bound to the uploaded files' SHA-256 fingerprints; if the files change, publishing is refused. The original request is then marked **done**.
+- **Not supported:** downloading from piracy sites (e.g. OceanofPDF) or replacing another site's watermark. When no legal copy exists, the bot says so, and you can add a licensed copy in the admin panel.
+- **Not yet built:** PDF generation from the EPUB, which needs Calibre in GitHub Actions.

@@ -5,6 +5,7 @@ import { addArtifact, audit } from './db.js';
 import { reply } from './telegram.js';
 import { handleCallback, handleMessage } from './commands.js';
 import { handleQueueBatch } from './orchestration/queue-consumer.js';
+import { pollBookRequests } from './books/requests.js';
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 
@@ -88,5 +89,9 @@ export default {
   },
   async queue(batch, env) {
     await handleQueueBatch(batch, env);
+  },
+  // Cron trigger (wrangler.jsonc): announce new booksharekh.com book requests in Telegram.
+  async scheduled(event, env) {
+    try { await pollBookRequests(env); } catch (e) { console.error('book request poll failed', String(e)); }
   },
 };

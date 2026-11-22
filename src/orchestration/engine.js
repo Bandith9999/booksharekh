@@ -8,6 +8,7 @@ import { runAIAction } from '../agents/runner.js';
 import { keyboards, notifyTaskOwner } from '../telegram.js';
 import { decide, requestApproval, revokeOpenApprovals } from './approvals.js';
 import { jobPayload, runGithubJob } from './github.js';
+import { draftPayload, publishPayload, runBookDraft, runBookPublish } from '../books/importer.js';
 import { SQL_NOW, TASK, isTerminal, transition } from './state-machine.js';
 
 const notify = (env, task, text, more) => notifyTaskOwner(env, task, text, more).catch(e => console.error('notify failed', String(e)));
@@ -45,13 +46,38 @@ async function insertStep(env, { taskId, agent, action, status, dependsOn = [], 
 }
 
 // ---------- task lifecycle ----------
-export async function createTask(env, { userId, description, type: forcedType = null }) {
+async function rateLimited(env, userId) {
   const limit = Number(env.TASK_RATE_LIMIT_PER_HOUR) || 20;
   const recent = await env.DB.prepare("SELECT COUNT(*) n FROM tasks WHERE telegram_user_id=? AND created_at > datetime('now','-1 hour')").bind(String(userId)).first();
   if (recent.n >= limit) return { rateLimited: true, limit, period: 'hour' };
   const dayLimit = Number(env.DAILY_TASK_LIMIT) || 50;
   const today = await env.DB.prepare("SELECT COUNT(*) n FROM tasks WHERE telegram_user_id=? AND created_at >= date('now')").bind(String(userId)).first();
   if (today.n >= dayLimit) return { rateLimited: true, limit: dayLimit, period: 'day (UTC)' };
+  return null;
+}
+
+// Owner tapped "Prepare draft" on a public-domain candidate: that tap is the approval for the
+// private draft. Publishing is a second, separate approval bound to the uploaded files.
+export async function createBookImport(env, { userId, book, requestId = null }) {
+  const limited = await rateLimited(env, userId);
+  if (limited) return limited;
+  const id = newId('BSK');
+  await env.DB.prepare('INSERT INTO tasks (id,telegram_user_id,request_text,task_type,proposal,status) VALUES (?,?,?,?,?,?)')
+    .bind(id, String(userId), clamp(`Import "${book.title}" by ${book.author} from Project Gutenberg #${book.id}`, 2000), 'book_import', '(preparing draft)', 'planning').run();
+  const prepId = await insertStep(env, { taskId: id, agent: 'book_researcher', action: 'prepare_draft', status: 'awaiting_approval',
+    input: { source: 'gutenberg', source_id: book.id, request_id: requestId } });
+  await insertStep(env, { taskId: id, agent: 'book_researcher', action: 'publish_book', status: 'pending', dependsOn: [prepId] });
+  await audit(env, id, 'TASK_CREATED', userId, `book_import gutenberg:${book.id}${requestId ? ` request:${requestId}` : ''}`);
+  const task = await getTask(env, id);
+  const step = await getAgentTask(env, prepId);
+  const req = await requestApproval(env, { task, agentTaskId: prepId, actionType: 'prepare_book_draft', payload: draftPayload(task, step) });
+  const r = await approveStep(env, req.id, userId);
+  return r.ok ? { id } : { id, failed: true, reason: r.reason };
+}
+
+export async function createTask(env, { userId, description, type: forcedType = null }) {
+  const limited = await rateLimited(env, userId);
+  if (limited) return limited;
 
   const id = newId('BSK');
   const type = forcedType || classifyTask(description);
@@ -85,13 +111,15 @@ export async function advance(env, taskId) {
   if (after.length && after.every(s => s.status === 'completed')) await transition(env.DB, 'tasks', taskId, 'completed');
 }
 
-async function payloadFor(env, task, action) {
+async function payloadFor(env, task, action, step = null) {
   if (action.kind === 'github_job') return jobPayload(env, task, action);
+  if (action.kind === 'book_draft') return draftPayload(task, step);
+  if (action.kind === 'book_publish') return publishPayload(env, task);
   throw new Error(`No approval payload for action kind ${action.kind}`);
 }
 
 async function requestStepApproval(env, task, step, action) {
-  const req = await requestApproval(env, { task, agentTaskId: step.id, actionType: action.approvalAction, payload: await payloadFor(env, task, action) });
+  const req = await requestApproval(env, { task, agentTaskId: step.id, actionType: action.approvalAction, payload: await payloadFor(env, task, action, step) });
   if (!req) return; // already requested (e.g. queue redelivery)
   if (!await transition(env.DB, 'agent_tasks', step.id, 'awaiting_approval', { from: ['pending'] })) {
     await env.DB.prepare("UPDATE task_approvals SET status='revoked' WHERE id=?").bind(req.id).run();
@@ -131,6 +159,12 @@ export async function runAgentTask(env, agentTaskId) {
       await advance(env, task.id);
     } else if (action.kind === 'github_job') {
       await runGithubJob(env, task, at, action);
+    } else if (action.kind === 'book_draft' || action.kind === 'book_publish') {
+      await transition(env.DB, 'tasks', task.id, 'running', { from: ['queued'] });
+      const output = action.kind === 'book_draft' ? await runBookDraft(env, task, at) : await runBookPublish(env, task, at);
+      await transition(env.DB, 'agent_tasks', at.id, 'completed', { from: ['running'], set: { output: JSON.stringify(output), error: null, finished_at: SQL_NOW } });
+      await audit(env, task.id, 'STEP_COMPLETED', 'worker', `${at.agent}.${at.action}`);
+      await advance(env, task.id);
     }
     return { ok: true };
   } catch (e) {

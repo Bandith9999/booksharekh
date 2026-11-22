@@ -5,7 +5,9 @@ import { reply, tg } from './telegram.js';
 import { AGENTS, TOOLS, isImplemented, validateRegistry } from './agents/registry.js';
 import { fallbackRoute, freeModels, paidEnabled, resolveRoute, validateRoute } from './ai/model-router.js';
 import { PROVIDER_NAMES, getProvider, normalizeProvider } from './ai/provider-factory.js';
-import { approveStep, cancelTask, createTask, legacyDecision, rejectStep, resumeTask } from './orchestration/engine.js';
+import { approveStep, cancelTask, createBookImport, createTask, legacyDecision, rejectStep, resumeTask } from './orchestration/engine.js';
+import { getCandidate, searchPublicDomain } from './books/gutenberg.js';
+import { candidatesMessage, findForRequest, rejectRequest } from './books/requests.js';
 import { budgets, tokensUsed } from './orchestration/budget.js';
 import { WORKFLOWS, WORKFLOW_FILE, githubHeaders, workflowUrl } from './orchestration/github.js';
 import { checkWebsite, formatHealth } from './website/health.js';
@@ -16,6 +18,7 @@ const HELP = `BookShareKH Manager
 /develop <change> — website code change: the Laravel Developer opens a pull request (approval first; never deploys)
 /website — live site health and security check
 /books [latest N | search <title>] — books from the website API
+/research <title> — find a public-domain copy (Project Gutenberg) and prepare a draft
 /taskstatus <task-id> — steps, approvals, tokens, GitHub run
 /approve <task-id> · /reject <task-id> — decide a waiting task
 /cancel <task-id> — cancel a task that has not started on GitHub
@@ -165,6 +168,19 @@ export async function diagnostics(env) {
   return lines.join('\n');
 }
 
+async function startImport(env, userId, gutenbergId, requestId) {
+  if (!apiConfigured(env)) return 'The website API is not connected yet, so drafts cannot be created. Install the AI API on booksharekh.com and set LARAVEL_API_TOKEN.';
+  const running = await env.DB.prepare(`SELECT id FROM tasks WHERE task_type='book_import' AND request_text LIKE ?
+      AND status NOT IN ('completed','failed','cancelled','rejected','plan_failed') LIMIT 1`).bind(`%Project Gutenberg #${gutenbergId}`).first();
+  if (running) return `This book is already being imported (task ${running.id}).`;
+  const book = await getCandidate(gutenbergId);
+  if (!book?.publicDomain || !book.epubUrl) return 'This title is not marked public domain with an EPUB on Project Gutenberg, so it cannot be imported.';
+  const r = await createBookImport(env, { userId, book, requestId });
+  if (r.rateLimited) return `Limit reached: at most ${r.limit} tasks per ${r.period}.`;
+  if (r.failed) return `Could not start the import (${r.reason}).`;
+  return `📥 Preparing a private draft of "${book.title}" (task ${r.id}). You will get a preview with a Publish button.`;
+}
+
 function decisionText(kind, r) {
   if (r.ok) return kind === 'approve'
     ? `Approved ${r.approval.task_id}. Queued; you'll get a message when the GitHub job starts.`
@@ -279,6 +295,11 @@ export async function handleMessage(env, m) {
         throw e;
       }
     }
+    case 'research': {
+      if (!c.args) return reply(env, chat, 'Use: /research Pride and Prejudice');
+      const m = candidatesMessage(c.args, await searchPublicDomain(c.args));
+      return reply(env, chat, m.text, m.reply_markup ? { reply_markup: m.reply_markup } : {});
+    }
     case 'agents': return reply(env, chat, await agentsText(env));
     case 'agent': {
       const [name, sub, ...rest] = c.args.split(/\s+/).filter(Boolean);
@@ -304,6 +325,17 @@ export async function handleCallback(env, q) {
     return reply(env, chat, decisionText(kind, kind === 'approve' ? await approveStep(env, m[2], user) : await rejectStep(env, m[2], user)));
   }
   if ((m = /^cx:(BSK-[a-f0-9-]{36})$/.exec(data))) return reply(env, chat, cancelText(m[1], await cancelTask(env, m[1], user)));
+  try {
+    if ((m = /^bi:(\d{1,7}):(\d{1,10})$/.exec(data))) return reply(env, chat, await startImport(env, user, Number(m[1]), Number(m[2]) || null));
+    if ((m = /^rq:(\d{1,10})$/.exec(data))) {
+      const msg = await findForRequest(env, Number(m[1]), user);
+      return reply(env, chat, msg.text, msg.reply_markup ? { reply_markup: msg.reply_markup } : {});
+    }
+    if ((m = /^rr:(\d{1,10})$/.exec(data))) { await rejectRequest(env, Number(m[1]), user); return reply(env, chat, `Book request #${m[1]} rejected.`); }
+  } catch (e) {
+    if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
+    throw e;
+  }
   if ((m = /^(approve|reject):(BSK-[a-f0-9-]{36})$/.exec(data))) { // Phase 1 buttons
     return reply(env, chat, decisionText(m[1], await legacyDecision(env, m[2], m[1], user)));
   }

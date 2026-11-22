@@ -7,7 +7,7 @@ import worker from '../src/index.js';
 
 export { worker };
 export const OWNER = 111;
-const MIGRATIONS = ['0001_init.sql', '0002_multi_agent.sql'].map(f => readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
+const MIGRATIONS = ['0001_init.sql', '0002_multi_agent.sql', '0003_settings.sql'].map(f => readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
 
 export function makeD1() {
   const db = new DatabaseSync(':memory:');
@@ -58,7 +58,7 @@ export function mockFetch(routes) {
   const calls = [];
   globalThis.fetch = async (url, init = {}) => {
     url = String(url);
-    const call = { url, init, body: init.body ? JSON.parse(init.body) : undefined };
+    const call = { url, init, body: typeof init.body === 'string' ? JSON.parse(init.body) : init.body };
     calls.push(call);
     for (const [re, fn] of routes) if (re.test(url)) return fn(url, init, call);
     throw new Error(`unexpected fetch ${url}`);

@@ -3,26 +3,34 @@
 //   GET /api/ai/health                     -> { ok, app, laravel, php, time }
 //   GET /api/ai/books?latest=N             -> { data: [{ id, title, author, status, created_at }] }
 //   GET /api/ai/books/search?q=...         -> { data: [...] }
-// Write endpoints (drafts, metadata, files, publish) are added after the real Book model is inspected,
-// and every write goes through an owner approval in the Worker first.
+//   POST /api/ai/drafts, POST /api/ai/drafts/{id}/files, POST /api/ai/drafts/{id}/publish
+//   GET /api/ai/requests?after_id=N, GET|PATCH /api/ai/requests/{id}
+// Every write is preceded by an owner approval in the Worker.
 import { clamp } from '../helpers.js';
 
 const TIMEOUT_MS = 10000;
+const RETRYABLE = new Set(['rate_limit', 'server', 'timeout', 'network']);
 
 export class WebsiteApiError extends Error {
-  constructor(message, kind) { super(message); this.kind = kind; } // not_configured | auth | not_installed | rate_limit | server | timeout | network | bad_response
+  // kind: not_configured | auth | not_installed | rejected | rate_limit | server | timeout | network | bad_response
+  constructor(message, kind) { super(message); this.kind = kind; }
+  get retryable() { return RETRYABLE.has(this.kind); }
 }
 
 export const apiConfigured = env => Boolean(env.LARAVEL_API_URL && env.LARAVEL_API_TOKEN);
 
-async function get(env, path, params = {}) {
+async function call(env, method, path, { params = {}, json, form, timeout = TIMEOUT_MS } = {}) {
   if (!apiConfigured(env)) throw new WebsiteApiError('The Laravel API is not connected yet (LARAVEL_API_URL / LARAVEL_API_TOKEN).', 'not_configured');
   const url = new URL(`${String(env.LARAVEL_API_URL).replace(/\/+$/, '')}${path}`);
   if (url.protocol !== 'https:') throw new WebsiteApiError('LARAVEL_API_URL must use https', 'not_configured');
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
+  const headers = { Authorization: `Bearer ${String(env.LARAVEL_API_TOKEN).trim()}`, Accept: 'application/json', 'User-Agent': 'BookShareKH-AI-Manager' };
+  let body;
+  if (json !== undefined) { headers['Content-Type'] = 'application/json'; body = JSON.stringify(json); }
+  if (form) body = form; // multipart; fetch sets the boundary
   let r;
   try {
-    r = await fetch(url, { headers: { Authorization: `Bearer ${String(env.LARAVEL_API_TOKEN).trim()}`, Accept: 'application/json', 'User-Agent': 'BookShareKH-AI-Manager' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    r = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(timeout) });
   } catch (e) {
     throw new WebsiteApiError(e?.name === 'TimeoutError' ? 'Website API timed out' : `Website API network error: ${clamp(e?.message, 80)}`, e?.name === 'TimeoutError' ? 'timeout' : 'network');
   }
@@ -30,10 +38,25 @@ async function get(env, path, params = {}) {
   if (r.status === 404) throw new WebsiteApiError('Website API endpoint not found (HTTP 404): the AI API is not installed on the site yet.', 'not_installed');
   if (r.status === 429) throw new WebsiteApiError('Website API rate limit reached; try again shortly.', 'rate_limit');
   if (r.status >= 500) throw new WebsiteApiError(`Website API error (HTTP ${r.status}).`, 'server');
-  const body = await r.json().catch(() => null);
-  if (!r.ok || !body) throw new WebsiteApiError(`Unexpected website API response (HTTP ${r.status}).`, 'bad_response');
-  return body;
+  const res = await r.json().catch(() => null);
+  // 409/422: the site refused the request (duplicate, rights, changed files); never retried.
+  if (r.status === 409 || r.status === 422) throw new WebsiteApiError(`Website refused: ${clamp(res?.error || res?.message || `HTTP ${r.status}`, 200)}`, 'rejected');
+  if (!r.ok || !res) throw new WebsiteApiError(`Unexpected website API response (HTTP ${r.status}).`, 'bad_response');
+  return res;
 }
+const get = (env, path, params) => call(env, 'GET', path, { params });
+
+export const createDraft = (env, body) => call(env, 'POST', '/api/ai/drafts', { json: body });
+export function uploadDraftFile(env, draftId, type, bytes, filename, mime) {
+  const form = new FormData();
+  form.set('type', type);
+  form.set('file', new Blob([bytes], { type: mime }), filename);
+  return call(env, 'POST', `/api/ai/drafts/${Number(draftId)}/files`, { form, timeout: 120000 });
+}
+export const publishDraft = (env, draftId, body) => call(env, 'POST', `/api/ai/drafts/${Number(draftId)}/publish`, { json: body, timeout: 60000 });
+export const listRequests = (env, afterId = 0) => get(env, '/api/ai/requests', { after_id: Number(afterId) || 0 });
+export const getRequest = async (env, id) => (await get(env, `/api/ai/requests/${Number(id)}`)).request;
+export const updateRequest = (env, id, body) => call(env, 'PATCH', `/api/ai/requests/${Number(id)}`, { json: body });
 
 const listOf = body => (Array.isArray(body?.data) ? body.data : []).slice(0, 20).map(b => ({
   id: b.id, title: clamp(b.title, 120), author: clamp(b.author, 80), status: clamp(b.status, 20), created_at: clamp(b.created_at, 25),
