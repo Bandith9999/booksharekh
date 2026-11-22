@@ -137,7 +137,9 @@ test('export helper keeps source, drops secrets and runtime data, and flags hard
   const dest = join(mkdtempSync(join(tmpdir(), 'bsk-out-')), 'clean');
   const r = prepareExport(src, dest);
   for (const kept of ['artisan', 'composer.json', 'composer.lock', 'app/Http/Controllers/BookController.php', 'resources/views/home.blade.php']) assert.ok(existsSync(join(dest, kept)), kept);
-  for (const dropped of ['.env', 'vendor', 'storage/logs', 'storage/framework', 'public/storage', 'backup.sql']) assert.ok(!existsSync(join(dest, dropped)), dropped);
+  for (const dropped of ['.env', 'vendor', 'storage/logs/laravel.log', 'storage/framework/sessions/x', 'public/storage', 'backup.sql']) assert.ok(!existsSync(join(dest, dropped)), dropped);
+  // Laravel's runtime folders are recreated empty (it needs them), with only a .gitignore inside.
+  for (const d of ['storage/logs', 'storage/framework/views', 'storage/framework/sessions']) assert.equal(readFileSync(join(dest, d, '.gitignore'), 'utf8'), '*\n!.gitignore\n', d);
   assert.equal(readFileSync(join(dest, '.env.example'), 'utf8'), 'APP_KEY=\nDB_PASSWORD=\nAPP_DEBUG=false\n', 'names only, safe defaults');
   assert.deepEqual(r.findings.map(f => f.file), ['config/legacy.php'], 'env() references are fine; hard-coded keys are flagged');
   assert.throws(() => prepareExport(join(src, 'app'), join(dest, '..', 'x')), /does not look like a Laravel root/);
