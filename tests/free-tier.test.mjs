@@ -18,6 +18,7 @@ const LIVE = WRANGLER.vars;
 const VARS = {
   ...LIVE, AI_DEFAULT_PROVIDER: 'google', AI_DEFAULT_MODEL: 'gemini-3.8-flash', AI_PAID_ENABLED: 'false',
   AI_MAX_REQUESTS_PER_MINUTE: '5', AI_MAX_REQUESTS_PER_DAY: '100', DAILY_TASK_LIMIT: '20', TASK_TOKEN_BUDGET: '30000', DAILY_TOKEN_BUDGET: '300000',
+  BOT_LANGUAGE: 'en', // these tests check behaviour and English wording; Khmer is covered in khmer.test.mjs
 };
 
 const GEN = /generativelanguage\.googleapis\.com\/v1beta\/models\/[^/]+:generateContent$/;

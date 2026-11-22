@@ -39,6 +39,8 @@
 		// Website management. WEBSITE_REPO = the PRIVATE Laravel repository name (empty until it exists).
 		// LARAVEL_API_URL = base URL of the restricted AI API (empty until installed); its token is the
 		// secret LARAVEL_API_TOKEN.
+		// Telegram messages: "km" = short Khmer (commands and technical words stay English); "en" = English.
+		"BOT_LANGUAGE": "km",
 		"WEBSITE_URL": "https://booksharekh.com",
 		// Book searches return only editions in these languages (2-letter codes).
 		"BOOK_LANGUAGES": "en",

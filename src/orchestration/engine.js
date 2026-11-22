@@ -6,6 +6,7 @@ import { audit, getAgentOverride, getAgentTask, getTask, listAgentTasks, listDep
 import { DEMO_JOB_STEP, getAction, getAgent } from '../agents/registry.js';
 import { runAIAction } from '../agents/runner.js';
 import { keyboards, notifyTaskOwner } from '../telegram.js';
+import { T, isKhmer } from '../i18n.js';
 import { decide, requestApproval, revokeOpenApprovals } from './approvals.js';
 import { closePullRequest, jobPayload, mergePayload, runGithubJob, runGithubMerge } from './github.js';
 import { draftPayload, publishPayload, runBookDraft, runBookPublish } from '../books/importer.js';
@@ -131,8 +132,9 @@ async function requestStepApproval(env, task, step, action) {
   await transition(env.DB, 'tasks', task.id, 'awaiting_approval');
   await audit(env, task.id, 'APPROVAL_REQUESTED', 'system', `${action.approvalAction} ${req.id}`);
   const fresh = await getTask(env, task.id);
-  await notify(env, fresh, `Task ${task.id}\nType: ${task.task_type}\n\n${fresh.proposal}\n\nProposed action: ${action.description}\nApproval expires in ${req.ttlHours} h.`,
-    { reply_markup: keyboards.approval(req.id, task.id) });
+  const actionText = isKhmer(env) && action.descriptionKm ? action.descriptionKm : action.description;
+  await notify(env, fresh, T.approval(env, task, fresh.proposal, actionText, req.ttlHours),
+    { reply_markup: keyboards.approval(req.id, task.id, env) });
 }
 
 // ---------- step execution (queue consumer) ----------
@@ -197,8 +199,8 @@ async function failStep(env, task, at, message) {
   await revokeOpenApprovals(env, task.id);
   await audit(env, task.id, planning ? 'PLAN_FAILED' : 'STEP_FAILED', 'worker', `${at.agent}.${at.action}: ${message}`);
   await notify(env, task, planning
-    ? `Task ${task.id}\nType: ${task.task_type}\n\n⚠️ AI planning failed: ${clamp(message, 400)}\n\nThis task cannot be approved or dispatched. Run /diag, fix the problem, then send the /task again.`
-    : `⚠️ Task ${task.id} failed at ${at.agent}.${at.action}:\n${clamp(message, 400)}\n\nNo automatic retry.`);
+    ? T.planFailed(env, task, clamp(message, 400))
+    : T.stepFailed(env, task, `${at.agent}.${at.action}`, clamp(message, 400)));
 }
 
 const cancelOpenSteps = (env, taskId) => env.DB.prepare(`UPDATE agent_tasks SET status='cancelled', updated_at=CURRENT_TIMESTAMP
@@ -210,7 +212,7 @@ async function pauseStep(env, task, at, message) {
   await transition(env.DB, 'tasks', task.id, 'paused', { set: { result_note: clamp(message, 500) } });
   await audit(env, task.id, 'PAUSED', 'worker', `${at.agent}.${at.action}: ${message}`);
   const ref = `${task.id.slice(0, 17)}…`;
-  await notify(env, task, `⏸ Task ${task.id} paused: ${clamp(message, 300)}\n\nNo paid AI provider was used. Google's free quota resets at midnight Pacific time; local limits reset at 00:00 UTC.\nSend /resume ${ref} to continue, or /cancel ${ref}.`);
+  await notify(env, task, T.paused(env, task, clamp(message, 300), ref));
   return { paused: true };
 }
 
@@ -238,7 +240,7 @@ export async function handleDeadLetter(env, agentTaskId) {
     await transition(env.DB, 'tasks', task.id, 'failed', { set: { result_note: message } });
     await cancelOpenSteps(env, task.id);
     await revokeOpenApprovals(env, task.id);
-    await notify(env, task, `⚠️ Task ${task.id}: ${message}`);
+    await notify(env, task, T.stepFailed(env, task, `${at.agent}.${at.action}`, message));
   }
   await audit(env, at.task_id, 'DEAD_LETTER', 'queue', `${at.agent}.${at.action}`);
 }

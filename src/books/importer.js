@@ -5,6 +5,7 @@ import { consumeStepApproval, finishApproval, releaseApproval } from '../orchest
 import { notifyTaskOwner } from '../telegram.js';
 import { createDraft, publishDraft, updateRequest, uploadDraftFile } from '../website/laravel-api.js';
 import { downloadFile, getCandidate } from './gutenberg.js';
+import { T } from '../i18n.js';
 
 async function bytesSha256(bytes) {
   const buf = await crypto.subtle.digest('SHA-256', bytes);
@@ -63,14 +64,11 @@ export async function runBookDraft(env, task, step) {
     }
     const ordered = Object.fromEntries(Object.entries(files).sort(([a], [b]) => a.localeCompare(b)));
 
-    const preview = [
-      `📖 Draft ready on booksharekh.com (private, not visible to visitors)`,
-      `Title: ${book.title}`, `Author: ${book.author}`,
-      `Genres: ${book.genres.join(', ') || '-'} · Language: ${book.languages.join(', ') || '-'}`,
-      `Files: EPUB ${(epub.byteLength / 1048576).toFixed(1)} MB (sha256 ${files.epub.slice(0, 12)}…)${files.cover ? ', cover image' : ', no cover'}`,
-      `Rights: public domain (Project Gutenberg #${book.id}) ${book.pageUrl}`,
-      dups.length ? `⚠️ A book with this title already exists on the site (#${dups.map(d => d.id).join(', #')}). Publishing will be refused.` : 'No duplicate title found on the site.',
-    ].join('\n');
+    const preview = T.draftPreview(env, {
+      title: book.title, author: book.author, genres: book.genres.join(', ') || '-', languages: book.languages.join(', ') || '-',
+      mb: (epub.byteLength / 1048576).toFixed(1), sha: files.epub.slice(0, 12), cover: Boolean(files.cover),
+      id: book.id, url: book.pageUrl, dups: dups.map(d => d.id).join(', #'),
+    });
     await env.DB.prepare('UPDATE tasks SET proposal=?, updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(clamp(preview, 1500), task.id).run();
     return { draft_id: draft.id, files: ordered, title: book.title, author: book.author, source_url: book.pageUrl, request_id: input.request_id ?? null };
   });
@@ -85,10 +83,10 @@ export async function runBookPublish(env, task, step) {
     if (prep.request_id) {
       try {
         await updateRequest(env, prep.request_id, { status: 'done', note: `Published: ${clamp(prep.title, 150)} (book #${res.book.id})` });
-        requestNote = `\nBook request #${prep.request_id} marked done.`;
+        requestNote = T.requestDone(env, prep.request_id);
       } catch (e) { requestNote = `\n⚠️ Could not mark request #${prep.request_id} done: ${e.message}`; }
     }
-    await notifyTaskOwner(env, task, `✅ Published "${prep.title}" by ${prep.author} on booksharekh.com (book #${res.book.id}${res.book.slug ? `, /${res.book.slug}` : ''}).${requestNote}`)
+    await notifyTaskOwner(env, task, T.published(env, prep, res.book.id, res.book.slug, requestNote))
       .catch(() => {});
     return { book_id: res.book.id, slug: res.book.slug ?? null };
   });

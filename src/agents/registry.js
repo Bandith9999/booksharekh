@@ -23,7 +23,7 @@ export const TOOLS = {
 // Demo GitHub job, approved per task. The Phase 1 workflow runs it.
 const demoJob = (label) => ({
   kind: 'github_job', tool: 'github_demo_workflow', requiresApproval: true, approvalAction: 'dispatch_github_job',
-  description: `Run the GitHub Actions demo job (${label}). Nothing is published.`,
+  description: `Run the GitHub Actions demo job (${label}). Nothing is published.`, descriptionKm: 'ដំណើរការ GitHub demo job។ មិនមានអ្វីត្រូវផ្សព្វផ្សាយទេ។',
 });
 
 // Which demo job step follows the plan, by task type.
@@ -51,10 +51,12 @@ const LIST = [
       demo_report_job: demoJob('text report'),
       // Owner taps "Prepare draft": download a public-domain EPUB + cover, create a PRIVATE draft.
       prepare_draft: { kind: 'book_draft', tool: 'gutenberg_download', requiresApproval: true, approvalAction: 'prepare_book_draft',
-        description: 'Download the public-domain EPUB and cover and create a private draft on booksharekh.com.' },
+        description: 'Download the public-domain EPUB and cover and create a private draft on booksharekh.com.',
+        descriptionKm: 'ទាញយក EPUB និងគម្រប ហើយបង្កើត draft (មិនទាន់បង្ហាញ)។' },
       // Owner taps "Publish": approval bound to the draft's exact file fingerprints.
       publish_book: { kind: 'book_publish', tool: 'website_publish', requiresApproval: true, approvalAction: 'publish_book',
-        description: 'Publish this book on booksharekh.com. It becomes visible to visitors.' },
+        description: 'Publish this book on booksharekh.com. It becomes visible to visitors.',
+        descriptionKm: 'ផ្សព្វផ្សាយសៀវភៅនេះលើ booksharekh.com។' },
     },
   },
   {
@@ -89,12 +91,12 @@ const LIST = [
     actions: {
       code_change_job: {
         kind: 'github_job', tool: 'github_pull_request', workflow: 'website_dev', requiresApproval: true, approvalAction: 'dispatch_code_change',
-        description: 'Run the Laravel Developer on the private website repo: new branch, code change, tests, pull request. Nothing is deployed.',
+        description: 'Run the Laravel Developer on the private website repo: new branch, code change, tests, pull request. Nothing is deployed.', descriptionKm: 'ឲ្យ Laravel Developer កែកូដ និងបង្កើត PR។ មិនទាន់ deploy ទេ។',
       },
       // Owner approves merging the exact reviewed commit into main (GitHub refuses if the PR changed).
       merge_pr: {
         kind: 'github_merge', tool: 'github_pull_request', requiresApproval: true, approvalAction: 'merge_pull_request',
-        description: 'Merge this pull request into main on the website repo. The live site does not change until it is deployed.',
+        description: 'Merge this pull request into main on the website repo. The live site does not change until it is deployed.', descriptionKm: 'Merge PR នេះចូល main។ វេបសាយផ្ទាល់មិនទាន់ប្តូរទេ។',
       },
     },
   },

@@ -4,6 +4,7 @@ import { audit, latestArtifact, newId } from '../db.js';
 import { notifyTaskOwner } from '../telegram.js';
 import { consumeApproval, consumeStepApproval, finishApproval, releaseApproval } from './approvals.js';
 import { transition } from './state-machine.js';
+import { T } from '../i18n.js';
 
 const HTTP_TIMEOUT_MS = 15000;
 
@@ -90,7 +91,7 @@ export async function runGithubJob(env, task, agentTask, action = null) {
   await env.DB.prepare("UPDATE agent_tasks SET lease_until=datetime('now','+3 hours') WHERE id=?").bind(agentTask.id).run();
   await transition(env.DB, 'tasks', task.id, 'running');
   await audit(env, task.id, 'DISPATCHED', 'worker', `${wf.repo(env)}/${wf.file} approval=${approval.id}`);
-  await notifyTaskOwner(env, task, `🚀 Task ${task.id}: GitHub Actions ${wf.label} started. You'll get a message when it finishes.`);
+  await notifyTaskOwner(env, task, T.jobStarted(env, task.id, wf.label));
 }
 
 // ---------- Merging an approved Laravel Developer pull request ----------
@@ -113,17 +114,18 @@ export async function mergePayload(env, task) {
 // Telegram review text: changed files and the first changed lines, so the owner can decide without GitHub.
 export async function prReviewText(env, prUrl, headSha, note) {
   const n = prNumberFromUrl(prUrl);
-  const lines = [`🔍 Pull request #${n} is ready: ${prUrl}`, `Commit ${headSha.slice(0, 12)} · ${clamp(note, 150)}`];
+  const L = T.prReview(env);
+  const lines = [L.ready(n, prUrl), `Commit ${headSha.slice(0, 12)} · ${clamp(note, 150)}`];
   try {
     const r = await fetch(`${websiteApi(env)}/pulls/${n}/files?per_page=30`, { headers: githubHeaders(env), signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
     const files = r.ok ? await r.json() : [];
     if (!files.length) throw new Error('no files');
-    lines.push('', `Changed files (${files.length}):`, ...files.slice(0, 10).map(f => `• ${f.filename} (+${f.additions} −${f.deletions})`));
+    lines.push('', L.files(files.length), ...files.slice(0, 10).map(f => `• ${f.filename} (+${f.additions} −${f.deletions})`));
     const changed = files.flatMap(f => String(f.patch || '').split('\n').filter(l => /^[+-](?![+-])/.test(l)).map(l => clamp(l.replace(/\s+/g, ' '), 110)));
-    lines.push('', 'Changes:', ...changed.slice(0, 20));
-    if (changed.length > 20) lines.push(`… ${changed.length - 20} more changed lines (see the PR)`);
-  } catch { lines.push('', 'The diff could not be loaded here; open the link to review it.'); }
-  lines.push('', 'Checks passed in the Laravel Developer job (PHP lint, tests, secret scan).');
+    lines.push('', L.changes, ...changed.slice(0, 20));
+    if (changed.length > 20) lines.push(L.more(changed.length - 20));
+  } catch { lines.push('', L.noDiff); }
+  lines.push('', L.checks);
   return lines.join('\n');
 }
 
@@ -145,7 +147,7 @@ export async function runGithubMerge(env, task, agentTask) {
     if (!r.ok || !body.merged) throw new JobError(`GitHub merge failed (HTTP ${r.status}): ${clamp(body.message, 120)}`, { retryable: r.status >= 500 });
     await finishApproval(env, approval.id, true);
     await audit(env, task.id, 'PR_MERGED', 'worker', `#${payload.pr_number} ${payload.head_sha} -> ${body.sha}`);
-    await notifyTaskOwner(env, task, `✅ Merged pull request #${payload.pr_number} into main (commit ${String(body.sha).slice(0, 12)}).\nThe live site has not changed yet; deploying is a separate step.`).catch(() => {});
+    await notifyTaskOwner(env, task, T.merged(env, payload.pr_number, String(body.sha).slice(0, 12))).catch(() => {});
     return { merged_sha: body.sha, pr_number: payload.pr_number };
   } catch (e) {
     if (e?.retryable) await releaseApproval(env, approval.id); else await finishApproval(env, approval.id, false);

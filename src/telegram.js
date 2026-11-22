@@ -1,4 +1,5 @@
 import { clamp } from './helpers.js';
+import { T } from './i18n.js';
 
 const HTTP_TIMEOUT_MS = 15000;
 
@@ -16,8 +17,11 @@ export const notifyTaskOwner = (env, task, text, more = {}) => reply(env, Number
 export const notifyOwner = (env, text, more = {}) => reply(env, Number(env.OWNER_TELEGRAM_ID), text, more);
 
 export const keyboards = {
-  approval: (approvalId, taskId) => ({ inline_keyboard: [
-    [{ text: '✅ Approve', callback_data: `ap:${approvalId}` }, { text: '❌ Reject', callback_data: `rj:${approvalId}` }],
-    [{ text: '🛑 Cancel task', callback_data: `cx:${taskId}` }],
-  ] }),
+  approval: (approvalId, taskId, env) => {
+    const b = T.buttons(env);
+    return { inline_keyboard: [
+      [{ text: b.approve, callback_data: `ap:${approvalId}` }, { text: b.reject, callback_data: `rj:${approvalId}` }],
+      [{ text: b.cancel, callback_data: `cx:${taskId}` }],
+    ] };
+  },
 };

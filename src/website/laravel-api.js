@@ -75,7 +75,7 @@ export const apiHealth = env => get(env, '/api/ai/health');
 export async function latestBooks(env, n = 5) { return listOf(await get(env, '/api/ai/books', { latest: Math.min(Math.max(n, 1), 20) })); }
 export async function searchBooks(env, q) { return listOf(await get(env, '/api/ai/books/search', { q: clamp(q, 100) })); }
 
-export function formatBooks(books, heading) {
-  if (!books.length) return `${heading}\n(no books found)`;
+export function formatBooks(books, heading, empty = '(no books found)') {
+  if (!books.length) return `${heading}\n${empty}`;
   return [heading, ...books.map(b => `• #${b.id} ${b.title}${b.author ? ` — ${b.author}` : ''}${b.status ? ` [${b.status}]` : ''}`)].join('\n');
 }

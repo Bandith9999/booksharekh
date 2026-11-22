@@ -3,6 +3,7 @@
 import { clamp, safeTaskId } from './helpers.js';
 import { addArtifact, audit } from './db.js';
 import { reply } from './telegram.js';
+import { T } from './i18n.js';
 import { advance } from './orchestration/engine.js';
 import { prReviewText } from './orchestration/github.js';
 import { handleCallback, handleMessage } from './commands.js';
@@ -24,7 +25,7 @@ async function telegramWebhook(request, env) {
     console.error('update processing error', String(e));
     // The update is already claimed, so a Telegram redelivery would be ignored. Tell the owner
     // instead, and answer 200 so Telegram stops retrying.
-    await reply(env, Number(env.OWNER_TELEGRAM_ID), `⚠️ Your last message could not be processed (${clamp(e?.message, 150)}). Nothing was retried; please send it again.`).catch(() => {});
+    await reply(env, Number(env.OWNER_TELEGRAM_ID), T.processingError(env, clamp(e?.message, 150))).catch(() => {});
     return json({ ok: false, error: 'processing error' });
   }
   return json({ ok: true });
@@ -73,10 +74,7 @@ async function finishJob(request, env) {
     await advance(env, data.task_id); // sends the diff with Approve (merge) / Reject (close PR)
     return json({ ok: true });
   }
-  const tail = row.task_type === 'website_code_change'
-    ? (prUrl ? `\n\nPull request for review: ${prUrl}${headSha ? `\nCommit ${headSha.slice(0, 12)}` : ''}\nNothing has been deployed. Deployment is a separate approval for this exact commit.` : '\n\nNo pull request was created.')
-    : '\n\nDemo job only. No public post or Laravel upload performed.';
-  await reply(env, Number(row.telegram_user_id), `Task ${data.task_id}: ${state}\n${clamp(data.note, 300)}\n${url}${tail}`);
+  await reply(env, Number(row.telegram_user_id), T.jobDone(env, data.task_id, state, clamp(data.note, 300), url, row.task_type !== 'website_code_change', prUrl));
   return json({ ok: true });
 }
 

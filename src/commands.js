@@ -7,6 +7,7 @@ import { fallbackRoute, freeModels, paidEnabled, resolveRoute, validateRoute } f
 import { PROVIDER_NAMES, getProvider, normalizeProvider } from './ai/provider-factory.js';
 import { approveStep, cancelTask, createBookImport, createTask, legacyDecision, rejectStep, resumeTask } from './orchestration/engine.js';
 import { getCandidate, searchPublicDomain } from './books/gutenberg.js';
+import { T, tr } from './i18n.js';
 import { candidatesMessage, findForRequest, rejectRequest } from './books/requests.js';
 import { budgets, tokensUsed } from './orchestration/budget.js';
 import { WORKFLOWS, WORKFLOW_FILE, githubHeaders, workflowUrl } from './orchestration/github.js';
@@ -176,24 +177,22 @@ async function startImport(env, userId, gutenbergId, requestId) {
   const book = await getCandidate(gutenbergId);
   if (!book?.publicDomain || !book.epubUrl) return 'This title is not marked public domain with an EPUB on Project Gutenberg, so it cannot be imported.';
   const r = await createBookImport(env, { userId, book, requestId });
-  if (r.rateLimited) return `Limit reached: at most ${r.limit} tasks per ${r.period}.`;
+  if (r.rateLimited) return T.rateLimited(env, r.limit, r.period);
   if (r.failed) return `Could not start the import (${r.reason}).`;
-  return `📥 Preparing a private draft of "${book.title}" (task ${r.id}). You will get a preview with a Publish button.`;
+  return T.preparing(env, book.title, r.id);
 }
 
-function decisionText(kind, r) {
-  if (r.ok) return kind === 'approve'
-    ? `Approved ${r.approval.task_id}. Queued; you'll get a message when the GitHub job starts.`
-    : `Rejected ${r.approval.task_id}. ${r.prClosed ? 'The pull request was closed.' : 'Nothing dispatched.'}`;
-  if (r.reason === 'expired') return 'This approval expired, so nothing was dispatched. Send the /task again.';
-  if (r.reason === 'enqueue_failed') return 'Approval recorded, but the job could not be queued; see the error above.';
-  return 'This decision has already been handled, or the task cannot be approved.';
+function decisionText(kind, r, env) {
+  if (r.ok) return kind === 'approve' ? T.approved(env, r.approval.task_id) : T.rejected(env, r.approval.task_id, r.prClosed);
+  if (r.reason === 'expired') return T.expired(env);
+  if (r.reason === 'enqueue_failed') return T.enqueueFailed(env);
+  return T.alreadyHandled(env);
 }
-function cancelText(taskId, r) {
-  if (r.ok) return `Cancelled ${taskId}. Open approvals were revoked; nothing will run.`;
-  if (r.reason === 'running') return `${taskId} is already running on GitHub Actions and cannot be stopped from here. Cancel the run in GitHub if needed.`;
-  if (r.reason === 'not_found') return 'Task not found.';
-  return `Cannot cancel: task is ${r.reason.replace('status ', '')}.`;
+function cancelText(taskId, r, env) {
+  if (r.ok) return T.cancelled(env, taskId);
+  if (r.reason === 'running') return T.cancelRunning(env, taskId);
+  if (r.reason === 'not_found') return T.notFound(env);
+  return T.cannotCancel(env, r.reason.replace('status ', ''));
 }
 
 async function resolveTask(env, chat, ref, usage) {
@@ -216,9 +215,9 @@ export async function handleMessage(env, m) {
   if (!user || !chat || m.chat.type !== 'private' || !isOwner(user, env.OWNER_TELEGRAM_ID)) return;
   const text = String(m.text || '').trim();
   const c = parseCommand(text);
-  if (!c) return reply(env, chat, 'Unknown command. Try /help.');
+  if (!c) return reply(env, chat, T.unknown(env));
   switch (c.cmd) {
-    case 'start': case 'help': return reply(env, chat, HELP);
+    case 'start': case 'help': return reply(env, chat, tr(T.help(env), HELP));
     case 'remember': {
       const parsed = parseMemory(text);
       if (!parsed) return reply(env, chat, 'Use: /remember video.language=Khmer');
@@ -241,9 +240,9 @@ export async function handleMessage(env, m) {
     case 'task': {
       if (!c.args) return reply(env, chat, 'Use: /task Make a short promotional video for an authorized sample book');
       const r = await createTask(env, { userId: user, description: c.args });
-      if (r.rateLimited) return reply(env, chat, `Limit reached: at most ${r.limit} tasks per ${r.period}. Try again later.`);
+      if (r.rateLimited) return reply(env, chat, T.rateLimited(env, r.limit, r.period));
       if (r.failed) return;
-      return reply(env, chat, `📝 Task ${r.id} received (type ${r.type}). Planning now; the plan and approval buttons will follow.`);
+      return reply(env, chat, T.taskReceived(env, r.id, r.type));
     }
     case 'taskstatus': case 'report': {
       const task = await resolveTask(env, chat, c.args, '/taskstatus <task-id>');
@@ -251,11 +250,11 @@ export async function handleMessage(env, m) {
     }
     case 'approve': case 'reject': {
       const task = await resolveTask(env, chat, c.args, `/${c.cmd} <task-id>`);
-      return task && reply(env, chat, decisionText(c.cmd, await decideByTask(env, task, c.cmd, user)));
+      return task && reply(env, chat, decisionText(c.cmd, await decideByTask(env, task, c.cmd, user), env));
     }
     case 'cancel': {
       const task = await resolveTask(env, chat, c.args, '/cancel <task-id>');
-      return task && reply(env, chat, cancelText(task.id, await cancelTask(env, task.id, user)));
+      return task && reply(env, chat, cancelText(task.id, await cancelTask(env, task.id, user), env));
     }
     case 'resume': {
       const task = await resolveTask(env, chat, c.args, '/resume <task-id>');
@@ -267,17 +266,18 @@ export async function handleMessage(env, m) {
       if (!c.args) return reply(env, chat, 'Use: /develop Change the homepage heading to "Welcome to BookShareKH"');
       if (!env.WEBSITE_REPO) return reply(env, chat, 'The website repository is not connected yet (WEBSITE_REPO is not set). See README section K.');
       const r = await createTask(env, { userId: user, description: c.args, type: 'website_code_change' });
-      if (r.rateLimited) return reply(env, chat, `Limit reached: at most ${r.limit} tasks per ${r.period}. Try again later.`);
+      if (r.rateLimited) return reply(env, chat, T.rateLimited(env, r.limit, r.period));
       if (r.failed) return;
-      return reply(env, chat, `📝 Website task ${r.id} received. Planning now; then you approve running the Laravel Developer, which opens a pull request. Nothing is deployed.`);
+      return reply(env, chat, T.developReceived(env, r.id));
     }
     case 'website': {
       await audit(env, null, 'WEBSITE_CHECK', user, c.args || 'status');
-      const lines = [formatHealth(await checkWebsite(env))];
+      const lines = [formatHealth(await checkWebsite(env), env)];
+      const H = T.health(env);
       if (apiConfigured(env)) {
-        try { const h = await apiHealth(env); lines.push(`✅ Laravel API: ${clamp(h.app || 'ok', 40)} · Laravel ${clamp(h.laravel || '?', 20)} · PHP ${clamp(h.php || '?', 20)}`); }
-        catch (e) { lines.push(`❌ Laravel API: ${e.message}`); }
-      } else lines.push('▫️ Laravel API not connected yet (needs the website repository first).');
+        try { const h = await apiHealth(env); lines.push(H.apiOk(clamp(h.app || 'ok', 40), clamp(h.laravel || '?', 20), clamp(h.php || '?', 20))); }
+        catch (e) { lines.push(H.apiErr(e.message)); }
+      } else lines.push(H.apiNone);
       return reply(env, chat, lines.join('\n'));
     }
     case 'books': {
@@ -286,10 +286,10 @@ export async function handleMessage(env, m) {
         if (sub === 'search') {
           const q = rest.join(' ');
           if (!q) return reply(env, chat, 'Use: /books search <title>');
-          return reply(env, chat, formatBooks(await searchBooks(env, q), `Books matching "${clamp(q, 60)}":`));
+          return reply(env, chat, formatBooks(await searchBooks(env, q), T.searchHeading(env, clamp(q, 60)), T.noBooks(env)));
         }
         const n = Number(rest[0] || (sub && sub !== 'latest' ? sub : 5)) || 5;
-        return reply(env, chat, formatBooks(await latestBooks(env, n), `Latest ${n} books:`));
+        return reply(env, chat, formatBooks(await latestBooks(env, n), T.booksHeading(env, n), T.noBooks(env)));
       } catch (e) {
         if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
         throw e;
@@ -297,7 +297,7 @@ export async function handleMessage(env, m) {
     }
     case 'research': {
       if (!c.args) return reply(env, chat, 'Use: /research Pride and Prejudice');
-      const m = candidatesMessage(c.args, await searchPublicDomain(c.args, { languages: env.BOOK_LANGUAGES }));
+      const m = candidatesMessage(c.args, await searchPublicDomain(c.args, { languages: env.BOOK_LANGUAGES }), 0, env);
       return reply(env, chat, m.text, m.reply_markup ? { reply_markup: m.reply_markup } : {});
     }
     case 'agents': return reply(env, chat, await agentsText(env));
@@ -309,7 +309,7 @@ export async function handleMessage(env, m) {
       return reply(env, chat, await agentText(env, a));
     }
     case 'diag': return reply(env, chat, await diagnostics(env));
-    default: return reply(env, chat, 'Unknown command. Try /help.');
+    default: return reply(env, chat, T.unknown(env));
   }
 }
 
@@ -322,21 +322,21 @@ export async function handleCallback(env, q) {
   let m;
   if ((m = /^(ap|rj):(APR-[a-f0-9-]{36})$/.exec(data))) {
     const kind = m[1] === 'ap' ? 'approve' : 'reject';
-    return reply(env, chat, decisionText(kind, kind === 'approve' ? await approveStep(env, m[2], user) : await rejectStep(env, m[2], user)));
+    return reply(env, chat, decisionText(kind, kind === 'approve' ? await approveStep(env, m[2], user) : await rejectStep(env, m[2], user), env));
   }
-  if ((m = /^cx:(BSK-[a-f0-9-]{36})$/.exec(data))) return reply(env, chat, cancelText(m[1], await cancelTask(env, m[1], user)));
+  if ((m = /^cx:(BSK-[a-f0-9-]{36})$/.exec(data))) return reply(env, chat, cancelText(m[1], await cancelTask(env, m[1], user), env));
   try {
     if ((m = /^bi:(\d{1,7}):(\d{1,10})$/.exec(data))) return reply(env, chat, await startImport(env, user, Number(m[1]), Number(m[2]) || null));
     if ((m = /^rq:(\d{1,10})$/.exec(data))) {
       const msg = await findForRequest(env, Number(m[1]), user);
       return reply(env, chat, msg.text, msg.reply_markup ? { reply_markup: msg.reply_markup } : {});
     }
-    if ((m = /^rr:(\d{1,10})$/.exec(data))) { await rejectRequest(env, Number(m[1]), user); return reply(env, chat, `Book request #${m[1]} rejected.`); }
+    if ((m = /^rr:(\d{1,10})$/.exec(data))) { await rejectRequest(env, Number(m[1]), user); return reply(env, chat, T.requestRejected(env, m[1])); }
   } catch (e) {
     if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
     throw e;
   }
   if ((m = /^(approve|reject):(BSK-[a-f0-9-]{36})$/.exec(data))) { // Phase 1 buttons
-    return reply(env, chat, decisionText(m[1], await legacyDecision(env, m[2], m[1], user)));
+    return reply(env, chat, decisionText(m[1], await legacyDecision(env, m[2], m[1], user), env));
   }
 }
