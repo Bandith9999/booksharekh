@@ -6,18 +6,51 @@
 		"enabled": true
 	},
 	"d1_databases": [
-  {
-    "binding": "DB",
-    "database_name": "booksharekh-ai-db",
-    "database_id": "b53158e2-465c-4324-b395-c90bb1a46300",
-    "migrations_dir": "migrations"
-  }
-],
+		{
+			"binding": "DB",
+			"database_name": "booksharekh-ai-db",
+			"database_id": "b53158e2-465c-4324-b395-c90bb1a46300",
+			"migrations_dir": "migrations"
+		}
+	],
+	// Create both queues once before deploying:
+	//   npx wrangler queues create booksharekh-tasks
+	//   npx wrangler queues create booksharekh-tasks-dlq
+	"queues": {
+		"producers": [{ "binding": "TASK_QUEUE", "queue": "booksharekh-tasks" }],
+		"consumers": [
+			{
+				"queue": "booksharekh-tasks",
+				"max_batch_size": 5,
+				"max_batch_timeout": 2,
+				"max_retries": 5,
+				"dead_letter_queue": "booksharekh-tasks-dlq"
+			},
+			{ "queue": "booksharekh-tasks-dlq", "max_batch_size": 10, "max_retries": 2 }
+		]
+	},
 	"vars": {
 		"OWNER_TELEGRAM_ID": "802529780",
 		"GITHUB_OWNER": "Bandith9999",
 		"GITHUB_REPO": "booksharekh",
-		"AI_PROVIDER": "anthropic",
-		"AI_MODEL": "claude-sonnet-5-5"
+
+		// Model routing by tier. Unset tiers use "default". Agents pick a tier in src/agents/registry.js;
+		// override one agent from Telegram with /agent <name> set provider=... model=...
+		// Providers: anthropic | openai | google | mock. Keys are Cloudflare secrets, never vars.
+		"AI_DEFAULT_PROVIDER": "anthropic",
+		"AI_DEFAULT_MODEL": "claude-sonnet-5-5",
+		"AI_FAST_PROVIDER": "anthropic",
+		"AI_FAST_MODEL": "claude-haiku-5-5",
+		"AI_REVIEW_PROVIDER": "anthropic",
+		"AI_REVIEW_MODEL": "claude-sonnet-5-5",
+
+		// Runtime provider fallback is off. If enabled, it is used only for rate limits, outages and
+		// timeouts, never for refusals, auth errors or budget limits, and only by agents that allow it.
+		"AI_FALLBACK_ENABLED": "false",
+
+		"TASK_TOKEN_BUDGET": "60000",
+		"DAILY_TOKEN_BUDGET": "500000",
+		"APPROVAL_TTL_HOURS": "24",
+		"TASK_RATE_LIMIT_PER_HOUR": "20"
 	}
 }

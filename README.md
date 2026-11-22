@@ -2,11 +2,28 @@
 
 An **implementable first milestone**, not the full production book-processing system.
 
-Cloudflare Worker = Telegram + owner-only approvals + D1 memory. Optional paid AI API = task planning. GitHub Actions = approved text report or 8-second **demo** vertical video. Nothing uploads to BookShareKH or TikTok. Books downloaded: **zero**.
+Cloudflare Worker = Telegram + owner-only approvals + D1 memory. Cloudflare Queues = background work. Anthropic, OpenAI or Gemini API = task planning. GitHub Actions = approved text report or 8-second **demo** vertical video. Nothing uploads to BookShareKH or TikTok. Books downloaded: **zero**.
+
+## Architecture (Phase 2)
+
+```text
+Telegram ──► Worker /telegram ──► D1 (task + steps) ──► Queue ──► Manager agent (AI plan, validated JSON)
+                                                                    │
+Owner taps Approve ◄── Telegram (plan + buttons) ◄── approval bound to the exact action (SHA-256)
+        │
+        ▼
+     Queue ──► GitHub Actions dispatch (once per approval) ──► /job-result ──► D1 + Telegram report
+```
+
+- **The webhook** only validates the update, stores it and enqueues work. All AI calls and GitHub dispatches run from the queue consumer.
+- **Each task** (`tasks`) has steps (`agent_tasks`), each owned by one agent and linked by `task_dependencies`. Steps whose dependencies are complete run in parallel. Status changes go through one state machine ([src/orchestration/state-machine.js](src/orchestration/state-machine.js)).
+- **Agents** are defined in [src/agents/registry.js](src/agents/registry.js): system prompt and version, output schema, allowed tools, actions, retry limit and model tier. The AI can only *propose* steps. Only actions declared in code can run, and every external action needs owner approval.
+- **Providers** ([src/ai/](src/ai/)) share one interface (`generate(env, request) → { provider, model, content, structuredOutput, usage, finishReason }`). Structured output is always validated in the Worker, whichever provider produced it.
+- **Implemented today:** the Manager plans with AI, and the demo GitHub job runs after approval. The six specialist agents are registered with prompts, schemas and tool permissions, but their AI work arrives in Phases 3–6. `/agents` shows which are live.
 
 ## Requirements
 
-- Cloudflare account (Workers Free + D1)
+- Cloudflare account (Workers Free + D1 + Queues)
 - GitHub account and **private** repository `booksharekh-ai-manager` (or change the config)
 - Telegram bot token from [BotFather](https://t.me/BotFather)
 - Node.js 22+ installed **only for setup/deployment**; turn your computer off afterward
@@ -111,11 +128,46 @@ Send:
 - Try pressing Approve twice: only the first action should dispatch.
 - Use `/status` and `/pending` to inspect recent records.
 
-## G. Turn on hosted AI planning (optional)
+## G. AI providers and models
 
-Edit `wrangler.jsonc`: set `AI_PROVIDER` to `openai`, `anthropic`, or `gemini`; set a supported `AI_MODEL` for that provider. Add the matching API key via `wrangler secret put`. Deploy again. Requests use the provider's official HTTPS API; charges and rate limits belong to that provider account.
+Each agent uses a **tier**, and each tier maps to a provider and model in `wrangler.jsonc`:
 
-## H. Troubleshooting
+| Variable | Used by | Default |
+|---|---|---|
+| `AI_DEFAULT_PROVIDER` / `AI_DEFAULT_MODEL` | Manager | `anthropic` / `claude-sonnet-5-5` |
+| `AI_FAST_PROVIDER` / `AI_FAST_MODEL` | Book Researcher, Content Creator, Video Creator | `anthropic` / `claude-haiku-5-5` |
+| `AI_REVIEW_PROVIDER` / `AI_REVIEW_MODEL` | EPUB/PDF Editor, QA Reviewer | `anthropic` / `claude-sonnet-5-5` |
+| `AI_CODE_PROVIDER` / `AI_CODE_MODEL` | Laravel Developer | unset → default tier |
+
+Providers are `anthropic`, `openai`, `google` (`gemini` also works) and `mock`. Each provider needs its key as a Cloudflare secret: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GEMINI_API_KEY`. The Phase 1 names `AI_PROVIDER` / `AI_MODEL` still work for the default tier.
+
+To change one agent without redeploying, send `/agent book_researcher set provider=google model=<gemini-model-id>`, then `/diag`. The command checks the model id format and that the key is set. `/diag` then asks the provider whether the model is available to your account. Use `/agent <name> set reset` to go back to the tier.
+
+- **Provider fallback is off.** Set `AI_FALLBACK_ENABLED=true` with `AI_FALLBACK_PROVIDER` and `AI_FALLBACK_MODEL` to turn it on. Even then, it is used only for rate limits, outages and timeouts. It is never used for refusals, auth errors or budget limits, and never by agents that disallow it (EPUB/PDF Editor, Laravel Developer, QA Reviewer).
+- **Anthropic's own refusal fallback** (`ANTHROPIC_REFUSAL_FALLBACK=true`) is also off by default.
+- **Budgets:** `TASK_TOKEN_BUDGET` (default 60,000) and `DAILY_TOKEN_BUDGET` (default 500,000) are checked before every model call. Every call is logged in `agent_execution_logs` with provider, model, tokens and prompt version.
+- **Limits:** `TASK_RATE_LIMIT_PER_HOUR` (default 20) and `APPROVAL_TTL_HOURS` (default 24).
+
+## H. Phase 2 deployment
+
+Run these from a branch checkout that has been reviewed and merged to `main`. GitHub Actions runs the workflow from `main`.
+
+```bash
+npm install && npm test
+npx wrangler queues create booksharekh-tasks
+npx wrangler queues create booksharekh-tasks-dlq
+npx wrangler d1 migrations apply booksharekh-ai-db --remote   # applies 0002 only; additive
+npx wrangler deploy
+```
+
+**Check it:** send `/diag`, which should be all ✅. Then send `/agents`, then `/task Make a short promotional video for an authorized sample book`. Wait for the plan message, press **Approve**, wait for "job started" and then "completed", and finish with `/taskstatus <id>`.
+
+**Rollback:**
+- `npx wrangler rollback` restores the previous Worker version. Migration 0002 only added tables, so the older Worker ignores them. Leave them in place, because dropping them would delete Phase 2 history.
+- Phase 1 code only understands `pending` tasks, so anything Phase 2 left in `planning`, `awaiting_approval` or `queued` will stay there. Cancel those first: `UPDATE tasks SET status='cancelled' WHERE status IN ('planning','awaiting_approval','queued')` via `wrangler d1 execute --remote`.
+- The queues can stay. Delete them with `wrangler queues delete` only after rolling back.
+
+## I. Troubleshooting
 
 Send `/diag` to the bot. It reports whether each secret is set (never its value), checks D1, asks Anthropic whether the key is accepted and `AI_MODEL` is available, and checks that the GitHub token can read the workflow.
 
@@ -124,6 +176,9 @@ Send `/diag` to the bot. It reports whether each secret is set (never its value)
 
 ## Important implementation boundaries
 
+- Telegram commands: `/task`, `/taskstatus`, `/approve`, `/reject`, `/cancel`, `/status`, `/pending`, `/agents`, `/agent`, `/remember`, `/memory`, `/diag`, `/help`. Buttons: Approve, Reject, Cancel task. Phase 1 approval buttons still work for tasks created before the upgrade.
+- A task already running on GitHub Actions cannot be cancelled from Telegram; cancel the run in GitHub.
+- If a GitHub dispatch times out, the Worker cannot know whether the run started, so it marks the task failed instead of dispatching twice. Check GitHub Actions before creating a new task.
 - This is a **first tested scaffold**. Cloud deployment and live Telegram/GitHub integration have **not** been executed here, because they require your accounts and secrets.
 - `/task` planning + approval + sample processing are implemented. Book metadata harvesting, EPUB/PDF transformation, verified rights workflows, Laravel API uploads, full production coworker orchestration, TikTok OAuth and public posting are **not yet implemented**.
 - Never put raw EPUB/PDF bytes in D1. Use licensed source files and an appropriate external media store if adding them later.

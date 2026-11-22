@@ -36,3 +36,21 @@ export function githubHint(status) {
   if (status === 422) return 'Workflow rejected the request: check that branch main exists and the workflow has workflow_dispatch with a task_id input.';
   return 'Unexpected response from GitHub.';
 }
+// Stable JSON (sorted keys) so the same action always hashes the same way.
+export function canonical(v) {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+  if (v && typeof v === 'object') return `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`;
+  return JSON.stringify(v ?? null);
+}
+export async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(text)));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+// Accepts a full task id or the shortened form /status prints ("BSK-1a2b3c4d-5e6f…").
+export function parseTaskRef(s) {
+  const ref = String(s || '').trim().replace(/…$/, '').toLowerCase().replace(/^bsk-/, 'BSK-');
+  return /^BSK-[a-f0-9-]{4,36}$/.test(ref) ? ref : null;
+}
+export function backoffSeconds(attempt, retryAfter = null) {
+  return Math.max(retryAfter ?? 0, Math.min(300, 10 * 2 ** Math.max(0, attempt - 1)));
+}

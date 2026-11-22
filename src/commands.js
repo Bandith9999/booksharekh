@@ -1,0 +1,251 @@
+// Telegram commands and button handlers. Every entry point checks the owner first.
+import { clamp, isOwner, parseCommand, parseMemory, parseTaskRef, githubHint } from './helpers.js';
+import { audit, findTask, getAgentOverride, listAgentTasks } from './db.js';
+import { reply, tg } from './telegram.js';
+import { AGENTS, TOOLS, isImplemented, validateRegistry } from './agents/registry.js';
+import { fallbackRoute, resolveRoute, validateRoute } from './ai/model-router.js';
+import { PROVIDER_NAMES, getProvider, normalizeProvider } from './ai/provider-factory.js';
+import { approveStep, cancelTask, createTask, legacyDecision, rejectStep } from './orchestration/engine.js';
+import { budgets, tokensUsed } from './orchestration/budget.js';
+import { WORKFLOW_FILE, githubHeaders, workflowUrl } from './orchestration/github.js';
+
+const HELP = `BookShareKH Manager
+/task <request> — plan a task (approval needed before anything runs)
+/taskstatus <task-id> — steps, approvals, tokens, GitHub run
+/approve <task-id> · /reject <task-id> — decide a waiting task
+/cancel <task-id> — cancel a task that has not started on GitHub
+/status — recent tasks · /pending — tasks waiting for approval
+/agents — the AI team · /agent <name> — details and settings
+/remember key=value · /memory — saved settings
+/diag — check AI providers, GitHub, queue and database
+
+Today the only executable job is the GitHub Actions demo (text report or sample video). Nothing is published.`;
+
+const short = id => `${id.slice(0, 17)}…`;
+
+// ---------- formatting ----------
+function routeLabel(env, def, override) {
+  try {
+    const r = resolveRoute(env, def, override);
+    validateRoute(env, r);
+    return `${r.provider}/${r.model} (${r.source})`;
+  } catch (e) { return `⚠️ ${e.message}`; }
+}
+
+async function agentsText(env) {
+  const lines = ['BookShareKH AI team'];
+  for (const a of Object.values(AGENTS)) {
+    const ov = await getAgentOverride(env, a.name);
+    const state = ov?.enabled === 0 ? '⏸ disabled' : isImplemented(a.name) ? `✅ ${Object.keys(a.actions).join(', ')}` : `🕓 planned (Phase ${a.phase})`;
+    lines.push(`\n${a.title} — ${a.name}\n   ${state}\n   ${routeLabel(env, a, ov)}`);
+  }
+  return lines.join('\n');
+}
+
+async function agentText(env, a) {
+  const ov = await getAgentOverride(env, a.name);
+  return [
+    `${a.title} (${a.name})`, a.description, '',
+    `Model: ${routeLabel(env, a, ov)}`,
+    `Enabled: ${ov?.enabled === 0 ? 'no' : 'yes'} · max attempts ${ov?.max_attempts ?? a.maxAttempts} · fallback ${a.allowFallback ? 'allowed if enabled' : 'never'}`,
+    `Tools: ${a.allowedTools.map(t => `${t}${TOOLS[t].implemented ? '' : ` (Phase ${TOOLS[t].phase})`}`).join(', ') || 'none'}`,
+    `Actions: ${Object.entries(a.actions).map(([n, x]) => `${n}${x.requiresApproval ? ' [approval]' : ''}`).join(', ') || `none yet (Phase ${a.phase})`}`,
+    `Prompt: ${a.prompt.version}`,
+    `Limits: ${a.limitations.join(' ')}`,
+    '', `Change: /agent ${a.name} set provider=<${PROVIDER_NAMES.join('|')}> model=<id> | enabled=on|off | max_attempts=1-5 | reset`,
+  ].join('\n');
+}
+
+async function agentSet(env, userId, a, args) {
+  const cur = (await getAgentOverride(env, a.name)) || { enabled: 1, provider: null, model: null, max_attempts: null };
+  let next = { enabled: cur.enabled, provider: cur.provider, model: cur.model, max_attempts: cur.max_attempts };
+  if (args[0] === 'reset') next = { enabled: 1, provider: null, model: null, max_attempts: null };
+  else for (const pair of args) {
+    const m = /^(provider|model|enabled|max_attempts)=(\S{1,80})$/.exec(pair);
+    if (!m) return `Not saved: "${clamp(pair, 40)}" is not a setting. Use provider=, model=, enabled=on|off, max_attempts=1-5, or reset.`;
+    const [, k, v] = m;
+    if (k === 'provider') {
+      next.provider = v === 'default' ? null : normalizeProvider(v);
+      if (next.provider && !PROVIDER_NAMES.includes(next.provider)) return `Not saved: provider must be one of ${PROVIDER_NAMES.join(', ')}.`;
+    }
+    if (k === 'model') next.model = v === 'default' ? null : v;
+    if (k === 'enabled') {
+      if (!['on', 'off'].includes(v)) return 'Not saved: enabled must be on or off.';
+      next.enabled = v === 'on' ? 1 : 0;
+    }
+    if (k === 'max_attempts') {
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < 1 || n > 5) return 'Not saved: max_attempts must be 1-5.';
+      next.max_attempts = n;
+    }
+  }
+  if (next.provider && next.provider !== 'mock' && !next.model) return 'Not saved: give model=<id> together with provider=.';
+  try { validateRoute(env, resolveRoute(env, a, next)); }
+  catch (e) { return `Not saved: ${e.message}`; }
+  await env.DB.prepare(`INSERT INTO agents (name,enabled,provider,model,max_attempts,updated_at,updated_by) VALUES (?,?,?,?,?,CURRENT_TIMESTAMP,?)
+      ON CONFLICT(name) DO UPDATE SET enabled=excluded.enabled, provider=excluded.provider, model=excluded.model,
+      max_attempts=excluded.max_attempts, updated_at=CURRENT_TIMESTAMP, updated_by=excluded.updated_by`)
+    .bind(a.name, next.enabled, next.provider, next.model, next.max_attempts, String(userId)).run();
+  await audit(env, null, 'AGENT_CONFIG_CHANGED', userId, `${a.name} ${JSON.stringify(next)}`);
+  return `Saved. ${a.name} now uses ${routeLabel(env, a, next)}${next.enabled ? '' : ' (disabled)'}. Run /diag to confirm the model is available.`;
+}
+
+async function taskStatusText(env, task) {
+  const steps = await listAgentTasks(env, task.id);
+  const approvals = (await env.DB.prepare('SELECT id,action_type,status,expires_at FROM task_approvals WHERE task_id=? ORDER BY requested_at').bind(task.id).all()).results || [];
+  const run = await env.DB.prepare('SELECT status,run_url FROM workflow_runs WHERE task_id=? ORDER BY created_at DESC LIMIT 1').bind(task.id).first();
+  const used = await tokensUsed(env, task.id);
+  const lines = [`Task ${task.id}`, `Status: ${task.status} · type ${task.task_type} · created ${task.created_at}`];
+  if (steps.length) {
+    lines.push('', 'Steps:');
+    for (const s of steps) lines.push(`• ${s.agent}.${s.action} — ${s.status}${s.attempts ? ` (attempt ${s.attempts}/${s.max_attempts})` : ''}${s.error && s.status !== 'completed' ? `\n   ${clamp(s.error, 160)}` : ''}`);
+  } else lines.push('', 'Steps: (created before Phase 2)');
+  for (const a of approvals) lines.push(`Approval ${a.id.slice(0, 12)}… ${a.action_type}: ${a.status}${a.status === 'requested' ? ` until ${a.expires_at} UTC` : ''}`);
+  lines.push(`Tokens: ${used.task} / ${budgets(env).task}`);
+  if (run || task.result_url) lines.push(`GitHub: ${run?.status ?? ''} ${task.result_url || run?.run_url || ''}`.trim());
+  if (task.result_note && ['failed', 'plan_failed', 'dispatch_failed', 'completed'].includes(task.status)) lines.push(`Note: ${clamp(task.result_note, 300)}`);
+  return lines.join('\n');
+}
+
+export async function diagnostics(env) {
+  const lines = ['BookShareKH diagnostics (secret values are never shown)'];
+  for (const name of ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_WEBHOOK_SECRET', 'JOB_CALLBACK_SECRET', 'GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY'])
+    lines.push(`${env[name] ? '✅' : '▫️'} ${name} ${env[name] ? 'set' : 'not set'}`);
+  lines.push(`${env.TASK_QUEUE ? '✅ Task queue bound' : '❌ TASK_QUEUE not bound: create the queues and deploy (README)'}`);
+  const regErrors = validateRegistry();
+  lines.push(regErrors.length ? `❌ Registry: ${regErrors.join('; ')}` : '✅ Agent registry valid');
+  try { await env.DB.prepare('SELECT 1 FROM agents LIMIT 1').first(); lines.push('✅ D1 reachable, Phase 2 tables present'); }
+  catch (e) { lines.push(`❌ D1: ${clamp(e.message, 120)} (apply migrations)`); }
+
+  const routes = new Map();
+  for (const a of Object.values(AGENTS)) {
+    if (!Object.values(a.actions).some(x => x.kind === 'ai')) continue; // only agents that call a model today
+    const ov = await getAgentOverride(env, a.name).catch(() => null);
+    if (ov?.enabled === 0) continue;
+    try { const r = resolveRoute(env, a, ov); validateRoute(env, r); routes.set(`${r.provider}/${r.model}`, r); }
+    catch (e) { lines.push(`❌ ${a.name}: ${e.message}`); }
+  }
+  const fb = fallbackRoute(env, { allowFallback: true });
+  if (fb) routes.set(`${fb.provider}/${fb.model} (fallback)`, fb);
+  for (const [label, r] of routes) {
+    try {
+      validateRoute(env, r);
+      const c = await getProvider(r.provider).checkModel(env, r.model);
+      lines.push(c.ok ? `✅ ${label}: key accepted, model available` : `❌ ${label}: HTTP ${c.status} ${c.detail}${c.hint ? `\n   → ${c.hint}` : ''}`);
+    } catch (e) { lines.push(`❌ ${label}: ${e.message}`); }
+  }
+  lines.push(`Budgets: ${budgets(env).task} tokens/task, ${budgets(env).daily} tokens/day · fallback ${env.AI_FALLBACK_ENABLED === 'true' ? 'enabled' : 'off'}`);
+
+  if (env.GITHUB_TOKEN && env.GITHUB_OWNER && env.GITHUB_REPO) {
+    try {
+      const r = await fetch(workflowUrl(env), { headers: githubHeaders(env), signal: AbortSignal.timeout(15000) });
+      lines.push(r.ok ? `✅ GitHub token can read ${WORKFLOW_FILE}. Dispatch also needs Actions: Read and write; only an approved task proves it.`
+        : `❌ GitHub HTTP ${r.status}\n   → ${githubHint(r.status)}`);
+    } catch (e) { lines.push(`❌ GitHub: ${clamp(e.message, 120)}`); }
+  } else lines.push('❌ GitHub settings incomplete (GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO)');
+  return lines.join('\n');
+}
+
+function decisionText(kind, r) {
+  if (r.ok) return kind === 'approve'
+    ? `Approved ${r.approval.task_id}. Queued; you'll get a message when the GitHub job starts.`
+    : `Rejected ${r.approval.task_id}. Nothing dispatched.`;
+  if (r.reason === 'expired') return 'This approval expired, so nothing was dispatched. Send the /task again.';
+  if (r.reason === 'enqueue_failed') return 'Approval recorded, but the job could not be queued; see the error above.';
+  return 'This decision has already been handled, or the task cannot be approved.';
+}
+function cancelText(taskId, r) {
+  if (r.ok) return `Cancelled ${taskId}. Open approvals were revoked; nothing will run.`;
+  if (r.reason === 'running') return `${taskId} is already running on GitHub Actions and cannot be stopped from here. Cancel the run in GitHub if needed.`;
+  if (r.reason === 'not_found') return 'Task not found.';
+  return `Cannot cancel: task is ${r.reason.replace('status ', '')}.`;
+}
+
+async function resolveTask(env, chat, ref, usage) {
+  const parsed = parseTaskRef(ref);
+  const task = parsed && await findTask(env, parsed);
+  if (!task) await reply(env, chat, parsed ? 'Task not found (or the id prefix matches more than one task).' : `Use: ${usage}`);
+  return task;
+}
+
+async function decideByTask(env, task, kind, userId) {
+  const open = await env.DB.prepare("SELECT id FROM task_approvals WHERE task_id=? AND status='requested' ORDER BY requested_at DESC LIMIT 1").bind(task.id).first();
+  if (open) return kind === 'approve' ? approveStep(env, open.id, userId) : rejectStep(env, open.id, userId);
+  if (task.status === 'pending') return legacyDecision(env, task.id, kind, userId);
+  return { ok: false, reason: 'nothing_to_decide' };
+}
+
+// ---------- entry points ----------
+export async function handleMessage(env, m) {
+  const user = m.from?.id, chat = m.chat?.id;
+  if (!user || !chat || m.chat.type !== 'private' || !isOwner(user, env.OWNER_TELEGRAM_ID)) return;
+  const text = String(m.text || '').trim();
+  const c = parseCommand(text);
+  if (!c) return reply(env, chat, 'Unknown command. Try /help.');
+  switch (c.cmd) {
+    case 'start': case 'help': return reply(env, chat, HELP);
+    case 'remember': {
+      const parsed = parseMemory(text);
+      if (!parsed) return reply(env, chat, 'Use: /remember video.language=Khmer');
+      await env.DB.prepare(`INSERT INTO memories (key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP`).bind(parsed.key, parsed.value).run();
+      await audit(env, null, 'MEMORY_UPDATED', user, parsed.key);
+      return reply(env, chat, `Saved: ${parsed.key} = ${parsed.value}`);
+    }
+    case 'memory': {
+      const rows = await env.DB.prepare('SELECT key,value FROM memories ORDER BY updated_at DESC LIMIT 30').all();
+      return reply(env, chat, rows.results?.length ? rows.results.map(x => `${x.key} = ${x.value}`).join('\n') : 'No memory saved.');
+    }
+    case 'status': case 'pending': {
+      const filter = c.cmd === 'pending' ? "WHERE status IN ('pending','awaiting_approval')" : '';
+      const rows = await env.DB.prepare(`SELECT id,status,task_type,created_at FROM tasks ${filter} ORDER BY created_at DESC LIMIT 10`).all();
+      return reply(env, chat, rows.results?.length ? rows.results.map(x => `${short(x.id)} | ${x.status} | ${x.task_type} | ${x.created_at}`).join('\n') : 'No matching tasks.');
+    }
+    case 'task': {
+      if (!c.args) return reply(env, chat, 'Use: /task Make a short promotional video for an authorized sample book');
+      const r = await createTask(env, { userId: user, description: c.args });
+      if (r.rateLimited) return reply(env, chat, `Limit reached: at most ${r.limit} tasks per hour. Try again later.`);
+      if (r.failed) return;
+      return reply(env, chat, `📝 Task ${r.id} received (type ${r.type}). Planning now; the plan and approval buttons will follow.`);
+    }
+    case 'taskstatus': case 'report': {
+      const task = await resolveTask(env, chat, c.args, '/taskstatus <task-id>');
+      return task && reply(env, chat, await taskStatusText(env, task));
+    }
+    case 'approve': case 'reject': {
+      const task = await resolveTask(env, chat, c.args, `/${c.cmd} <task-id>`);
+      return task && reply(env, chat, decisionText(c.cmd, await decideByTask(env, task, c.cmd, user)));
+    }
+    case 'cancel': {
+      const task = await resolveTask(env, chat, c.args, '/cancel <task-id>');
+      return task && reply(env, chat, cancelText(task.id, await cancelTask(env, task.id, user)));
+    }
+    case 'agents': return reply(env, chat, await agentsText(env));
+    case 'agent': {
+      const [name, sub, ...rest] = c.args.split(/\s+/).filter(Boolean);
+      const a = AGENTS[name];
+      if (!a) return reply(env, chat, `Use: /agent <name>. Agents: ${Object.keys(AGENTS).join(', ')}`);
+      if (sub === 'set') return reply(env, chat, await agentSet(env, user, a, rest));
+      return reply(env, chat, await agentText(env, a));
+    }
+    case 'diag': return reply(env, chat, await diagnostics(env));
+    default: return reply(env, chat, 'Unknown command. Try /help.');
+  }
+}
+
+export async function handleCallback(env, q) {
+  const user = q.from?.id, chat = q.message?.chat?.id;
+  const owner = isOwner(user, env.OWNER_TELEGRAM_ID);
+  await tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: owner ? 'Decision received' : 'Unauthorized', show_alert: !owner });
+  if (!chat || q.message.chat.type !== 'private' || !owner) return;
+  const data = String(q.data || '');
+  let m;
+  if ((m = /^(ap|rj):(APR-[a-f0-9-]{36})$/.exec(data))) {
+    const kind = m[1] === 'ap' ? 'approve' : 'reject';
+    return reply(env, chat, decisionText(kind, kind === 'approve' ? await approveStep(env, m[2], user) : await rejectStep(env, m[2], user)));
+  }
+  if ((m = /^cx:(BSK-[a-f0-9-]{36})$/.exec(data))) return reply(env, chat, cancelText(m[1], await cancelTask(env, m[1], user)));
+  if ((m = /^(approve|reject):(BSK-[a-f0-9-]{36})$/.exec(data))) { // Phase 1 buttons
+    return reply(env, chat, decisionText(m[1], await legacyDecision(env, m[2], m[1], user)));
+  }
+}
