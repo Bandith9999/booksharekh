@@ -15,9 +15,9 @@
 ],
 	"vars": {
 		"OWNER_TELEGRAM_ID": "802529780",
-		"GITHUB_OWNER": "REPLACE_WITH_GITHUB_OWNER",
-		"GITHUB_REPO": "booksharekh-ai-manager",
-		"AI_PROVIDER": "mock",
-		"AI_MODEL": "gpt-4.1-mini"
+		"GITHUB_OWNER": "Bandith9999",
+		"GITHUB_REPO": "booksharekh",
+		"AI_PROVIDER": "anthropic",
+		"AI_MODEL": "claude-sonnet-5-5"
 	}
 }

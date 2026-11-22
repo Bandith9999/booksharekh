@@ -19,7 +19,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Install FFmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-noto-core
       - name: Process approved job
         env:
           WORKER_URL: ${{ secrets.WORKER_URL }}

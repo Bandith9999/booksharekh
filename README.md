@@ -115,6 +115,13 @@ Send:
 
 Edit `wrangler.jsonc`: set `AI_PROVIDER` to `openai`, `anthropic`, or `gemini`; set a supported `AI_MODEL` for that provider. Add the matching API key via `wrangler secret put`. Deploy again. Requests use the provider's official HTTPS API; charges and rate limits belong to that provider account.
 
+## H. Troubleshooting
+
+Send `/diag` to the bot. It reports whether each secret is set (never its value), checks D1, asks Anthropic whether the key is accepted and `AI_MODEL` is available, and checks that the GitHub token can read the workflow.
+
+- **Claude HTTP 401 / "AI planning failed"**: the `ANTHROPIC_API_KEY` value is wrong or revoked. Create a key in the Claude Console (API Keys), run `npx wrangler secret put ANTHROPIC_API_KEY`, and paste only the `sk-ant-…` value. A Claude Pro/Max subscription cannot be used as an API key. The task is saved as `plan_failed` and cannot be approved. Send the `/task` again after fixing the key.
+- **GitHub HTTP 403 "Resource not accessible by personal access token"**: edit the fine-grained token (GitHub → Settings → Developer settings → Fine-grained tokens). Set Repository access to include this repository, and set Repository permissions → **Actions: Read and write**. If you create a new token, run `npx wrangler secret put GITHUB_TOKEN`. `dispatch_failed` tasks are not retried; create a new `/task`.
+
 ## Important implementation boundaries
 
 - This is a **first tested scaffold**. Cloud deployment and live Telegram/GitHub integration have **not** been executed here, because they require your accounts and secrets.
