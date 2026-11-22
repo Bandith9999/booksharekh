@@ -293,24 +293,6 @@ export async function rejectStep(env, approvalId, userId) {
   return { ok: true, approval: ap, prClosed };
 }
 
-// Phase 1 buttons (approve:/reject:<task id>) on tasks still in legacy 'pending'.
-export async function legacyDecision(env, taskId, decision, userId) {
-  const task = await getTask(env, taskId);
-  if (!task || task.status !== 'pending' || task.telegram_user_id !== String(userId)) return { ok: false, reason: 'already_handled' };
-  if (decision === 'reject') {
-    if (!await transition(env.DB, 'tasks', taskId, 'rejected', { from: ['pending'] })) return { ok: false, reason: 'already_handled' };
-    await audit(env, taskId, 'REJECT', userId, 'legacy');
-    return { ok: true, approval: { task_id: taskId } };
-  }
-  // The owner approved the proposal shown in the Phase 1 message: bind an approval to it, then run it.
-  const step = DEMO_JOB_STEP[task.task_type] || DEMO_JOB_STEP.report;
-  const stepId = await insertStep(env, { taskId, agent: step.agent, action: step.action, status: 'awaiting_approval' });
-  const action = getAction(step.agent, step.action);
-  const req = await requestApproval(env, { task, agentTaskId: stepId, actionType: action.approvalAction, payload: await payloadFor(env, task, action) });
-  if (!req) return { ok: false, reason: 'already_handled' };
-  return approveStep(env, req.id, userId);
-}
-
 export async function cancelTask(env, taskId, userId) {
   const task = await getTask(env, taskId);
   if (!task || task.telegram_user_id !== String(userId)) return { ok: false, reason: 'not_found' };

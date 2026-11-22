@@ -66,7 +66,7 @@ test('Approve credits once with the exact amount shown; a second tap does not', 
   assert.equal(s.decisions.length, 1);
   assert.deepEqual({ ...s.decisions[0].body, approval_id: undefined }, { amount: '10.00', transaction_id: 'TX5', approval_id: undefined });
   assert.match(s.decisions[0].body.approval_id, /^TG-\d+-\d+$/);
-  assert.equal(lastText(calls), '✅ Topup #5 +10.00 USD · dara (សមតុល្យ 15.00 USD)');
+  assert.equal(lastText(calls), '✅ Top-up #5 +10.00 USD · dara (សមតុល្យ 15.00 USD)');
   await telegram(e, press('ta:5'));
   assert.equal(s.decisions.length, 1, 'no second call to the site');
   assert.equal(lastText(calls), 'រកមិនឃើញ។ សូមវាយ /topups');
@@ -81,13 +81,13 @@ test('Reject, already-decided and changed top-ups are reported, never credited',
   const calls = mockFetch([[/api\.telegram\.org/, () => Response.json({ ok: true, result: {} })], s.route, s.requests]);
   await worker.scheduled({}, e, {});
   await telegram(e, press('tr:6'));
-  assert.equal(lastText(calls), '❌ Topup #6 បានបដិសេធ');
+  assert.equal(lastText(calls), '❌ Top-up #6 បានបដិសេធ');
   rows[1].status = 'approved'; // approved in the admin panel meanwhile
   await telegram(e, press('ta:7'));
-  assert.equal(lastText(calls), '⚠️ Topup #7: This top-up has already been approved.');
+  assert.equal(lastText(calls), '⚠️ Top-up #7: This top-up has already been approved.');
   rows[2].amount = '100.00'; // record changed after the alert
   await telegram(e, press('ta:8'));
-  assert.match(lastText(calls), /^⚠️ Topup #8: The top-up changed/);
+  assert.match(lastText(calls), /^⚠️ Top-up #8: The top-up changed/);
   assert.equal(rows[2].status, 'pending');
 });
 

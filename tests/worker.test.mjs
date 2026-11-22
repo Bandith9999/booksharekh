@@ -101,9 +101,6 @@ test('Claude 401 → plan_failed, no buttons, cannot be approved', async () => {
   assert.doesNotMatch(out.text, /SECRET-VALUE/);
   assert.equal(calls.filter(c => c.url.includes('anthropic')).length, 1, 'auth errors are not retried');
   assert.equal(approvals(env, task.id).length, 0);
-  await telegram(env, msg(`/approve ${task.id}`));
-  await drain(env);
-  assert.match(lastText(calls), /cannot be approved/);
   assert.equal(dispatches(calls).length, 0);
 });
 

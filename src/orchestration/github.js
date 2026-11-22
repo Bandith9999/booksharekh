@@ -101,7 +101,7 @@ export async function runGithubJob(env, task, agentTask, action = null) {
   await env.DB.prepare("UPDATE agent_tasks SET lease_until=datetime('now','+3 hours') WHERE id=?").bind(agentTask.id).run();
   await transition(env.DB, 'tasks', task.id, 'running');
   await audit(env, task.id, 'DISPATCHED', 'worker', `${wf.repo(env)}/${wf.file} approval=${approval.id}`);
-  await notifyTaskOwner(env, task, T.jobStarted(env, task.id, wf.label));
+  // No "started" message: the approval reply already says it is running (one message, not two).
 }
 
 // ---------- Merging an approved Laravel Developer pull request ----------

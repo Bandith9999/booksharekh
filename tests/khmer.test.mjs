@@ -12,7 +12,7 @@ test('/help and unknown commands are in Khmer, commands stay in English', async 
   await telegram(env, msg('/help'));
   const help = lastText(calls);
   assert.match(help, KHMER);
-  for (const cmd of ['/task', '/develop', '/research', '/books', '/website', '/approve', '/diag']) assert.ok(help.includes(cmd), cmd);
+  for (const cmd of ['/task', '/develop', '/research', '/books', '/website', '/topups', '/users', '/diag']) assert.ok(help.includes(cmd), cmd);
   await telegram(env, msg('/nope'));
   assert.equal(lastText(calls), 'មិនស្គាល់ command។ សូមវាយ /help');
 });
@@ -70,7 +70,7 @@ test('/website and book request alerts in Khmer', async () => {
   await worker.scheduled({}, env, {});
   const alert = sent(calls).at(-1);
   assert.equal(alert.text, '*** សំណើសៀវភៅ ***\n📚 #2 Moby Dick — Herman Melville');
-  assert.deepEqual(alert.reply_markup.inline_keyboard[0].map(b => [b.text, b.callback_data]), [['🔎 ស្វែងរក', 'rq:2'], ['🚫 បដិសេធ', 'rr:2']]);
+  assert.deepEqual(alert.reply_markup.inline_keyboard[0].map(b => [b.text, b.callback_data]), [['🔎 ស្វែងរក', 'rq:2'], ['❌ បដិសេធ', 'rr:2']]);
 });
 
 test('Khmer PR review and deploy preview are minimal: no link, commit or IDs; each change once', async () => {

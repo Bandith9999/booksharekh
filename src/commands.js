@@ -5,7 +5,7 @@ import { reply, tg } from './telegram.js';
 import { AGENTS, TOOLS, isImplemented, validateRegistry } from './agents/registry.js';
 import { fallbackRoute, freeModels, paidEnabled, resolveRoute, validateRoute } from './ai/model-router.js';
 import { PROVIDER_NAMES, getProvider, normalizeProvider } from './ai/provider-factory.js';
-import { approveStep, cancelTask, createBookImport, createDeployTask, createTask, legacyDecision, rejectStep, resumeTask } from './orchestration/engine.js';
+import { approveStep, cancelTask, createBookImport, createDeployTask, createTask, rejectStep, resumeTask } from './orchestration/engine.js';
 import { SourceDownError, getCandidate, searchPublicDomain } from './books/gutenberg.js';
 import { T, tr } from './i18n.js';
 import { candidatesMessage, findForRequest, recentPendingRequests, rejectRequest, requestKeyboard } from './books/requests.js';
@@ -25,11 +25,10 @@ const HELP = `BookShareKH Manager
 /books [latest N | search <title>] — books from the website API
 /research <title> — find a public-domain copy (Project Gutenberg) and prepare a draft
 /requests — pending book requests from visitors
-/taskstatus <task-id> — steps, approvals, tokens, GitHub run
-/approve <task-id> · /reject <task-id> — decide a waiting task
+/topups — pending top-ups · /users — user numbers · /preview — sample of every alert
+/status — recent tasks (waiting ones first) · /taskstatus <task-id> — details
 /cancel <task-id> — cancel a task that has not started on GitHub
 /resume <task-id> — continue a task paused by a daily AI quota
-/status — recent tasks · /pending — tasks waiting for approval
 /agents — the AI team · /agent <name> — details and settings
 /remember key=value · /memory — saved settings
 /diag — check AI providers, GitHub, queue and database
@@ -207,12 +206,6 @@ async function resolveTask(env, chat, ref, usage) {
   return task;
 }
 
-async function decideByTask(env, task, kind, userId) {
-  const open = await env.DB.prepare("SELECT id FROM task_approvals WHERE task_id=? AND status='requested' ORDER BY requested_at DESC LIMIT 1").bind(task.id).first();
-  if (open) return kind === 'approve' ? approveStep(env, open.id, userId) : rejectStep(env, open.id, userId);
-  if (task.status === 'pending') return legacyDecision(env, task.id, kind, userId);
-  return { ok: false, reason: 'nothing_to_decide' };
-}
 
 // ---------- entry points ----------
 export async function handleMessage(env, m) {
@@ -237,10 +230,10 @@ export async function handleMessage(env, m) {
       const rows = await env.DB.prepare('SELECT key,value FROM memories ORDER BY updated_at DESC LIMIT 30').all();
       return reply(env, chat, rows.results?.length ? rows.results.map(x => `${x.key} = ${x.value}`).join('\n') : 'No memory saved.');
     }
-    case 'status': case 'pending': {
-      const filter = c.cmd === 'pending' ? "WHERE status IN ('pending','awaiting_approval')" : '';
-      const rows = await env.DB.prepare(`SELECT id,status,task_type,created_at FROM tasks ${filter} ORDER BY created_at DESC LIMIT 10`).all();
-      return reply(env, chat, rows.results?.length ? rows.results.map(x => `${short(x.id)} | ${x.status} | ${x.task_type} | ${x.created_at}`).join('\n') : 'No matching tasks.');
+    case 'status': { // one list: tasks waiting for you first (⏳), then the most recent
+      const rows = await env.DB.prepare(`SELECT id,status,task_type,created_at FROM tasks
+        ORDER BY (status='awaiting_approval') DESC, created_at DESC LIMIT 10`).all();
+      return reply(env, chat, rows.results?.length ? rows.results.map(x => `${x.status === 'awaiting_approval' ? '⏳ ' : ''}${short(x.id)} | ${x.status} | ${x.task_type} | ${x.created_at}`).join('\n') : 'No tasks yet.');
     }
     case 'task': {
       if (!c.args) return reply(env, chat, 'Use: /task Make a short promotional video for an authorized sample book');
@@ -249,13 +242,9 @@ export async function handleMessage(env, m) {
       if (r.failed) return;
       return reply(env, chat, T.taskReceived(env, r.id, r.type));
     }
-    case 'taskstatus': case 'report': {
+    case 'taskstatus': {
       const task = await resolveTask(env, chat, c.args, '/taskstatus <task-id>');
       return task && reply(env, chat, await taskStatusText(env, task));
-    }
-    case 'approve': case 'reject': {
-      const task = await resolveTask(env, chat, c.args, `/${c.cmd} <task-id>`);
-      return task && reply(env, chat, decisionText(c.cmd, await decideByTask(env, task, c.cmd, user), env));
     }
     case 'cancel': {
       const task = await resolveTask(env, chat, c.args, '/cancel <task-id>');
@@ -385,8 +374,5 @@ export async function handleCallback(env, q) {
     if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
     if (e instanceof SourceDownError) return reply(env, chat, T.sourceDown(env));
     throw e;
-  }
-  if ((m = /^(approve|reject):(BSK-[a-f0-9-]{36})$/.exec(data))) { // Phase 1 buttons
-    return reply(env, chat, decisionText(m[1], await legacyDecision(env, m[2], m[1], user), env));
   }
 }

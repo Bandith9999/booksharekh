@@ -208,29 +208,19 @@ test('only the owner can approve, cancel or change agents', async () => {
   assert.equal(env.DB.db.prepare("SELECT enabled FROM agents WHERE name='manager'").get().enabled, 1);
 });
 
-test('/approve and /reject commands decide the waiting step', async () => {
+test('one way to decide (buttons) and one task list (/status, waiting first)', async () => {
   const env = makeEnv();
   const calls = mockFetch([routes.telegram, routes.dispatchOk]);
   const { task } = await planTask(env, calls);
-  await telegram(env, msg(`/reject ${task.id.slice(0, 13)}`));
-  assert.match(lastText(calls), /Rejected/);
-  assert.equal(latestTask(env).status, 'rejected');
-  assert.deepEqual(steps(env, task.id).map(s => s.status), ['completed', 'rejected']);
-});
-
-test('Phase 1 tasks still in pending can be approved once with the old buttons', async () => {
-  const env = makeEnv();
-  const calls = mockFetch([routes.telegram, routes.dispatchOk]);
-  const id = 'BSK-12345678-1234-1234-1234-123456789abc';
-  env.DB.db.prepare("INSERT INTO tasks (id,telegram_user_id,request_text,task_type,proposal,status) VALUES (?,'111','old request','report','old plan','pending')").run(id);
-  await telegram(env, press(`approve:${id}`));
-  assert.equal(latestTask(env).status, 'queued');
-  await telegram(env, press(`approve:${id}`));
-  assert.match(lastText(calls), /already been handled/);
-  await drain(env);
-  assert.equal(dispatches(calls).length, 1);
-  assert.equal(latestTask(env).status, 'running');
-  assert.equal(approvals(env, id)[0].status, 'executed');
+  for (const cmd of [`/approve ${task.id}`, `/reject ${task.id}`, '/pending', `/report ${task.id}`]) {
+    await telegram(env, msg(cmd));
+    assert.equal(lastText(calls), 'Unknown command. Try /help.', cmd);
+  }
+  await telegram(env, press(`approve:${task.id}`)); // old Phase 1 button
+  assert.equal(latestTask(env).status, 'awaiting_approval', 'old buttons do nothing');
+  env.DB.db.prepare("INSERT INTO tasks (id,telegram_user_id,request_text,task_type,proposal,status,created_at) VALUES ('BSK-99999999-9999-4999-8999-999999999999','111','x','report','p','completed',datetime('now','+1 hour'))").run();
+  await telegram(env, msg('/status'));
+  assert.match(lastText(calls), /^⏳ BSK-[^\n]*awaiting_approval[^\n]*\nBSK-99999999/, 'waiting task listed first');
 });
 
 test('provider fallback: off by default, availability errors only when enabled', async () => {

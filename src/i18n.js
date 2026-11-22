@@ -27,8 +27,8 @@ export const T = {
 /books [latest N | search <ចំណងជើង>] — សៀវភៅលើវេបសាយ
 /website — ពិនិត្យវេបសាយ
 /deploy — ដាក់កូដដែលបាន merge ឲ្យដំណើរការលើវេបសាយ
-/status · /pending · /taskstatus <id>
-/approve · /reject · /cancel · /resume <id>
+/status · /taskstatus <id>
+/cancel · /resume <id>
 /agents · /diag · /memory · /remember key=value
 
 រាល់ការផ្លាស់ប្តូរ ត្រូវរង់ចាំការយល់ព្រមពីអ្នក។`),
@@ -43,7 +43,7 @@ export const T = {
     `${proposal}\n\n👉 ${actionText}\n⏳ ${ttl} ម៉ោង · ${short(task.id)}`),
   buttons: env => pick(env, { approve: '✅ Approve', reject: '❌ Reject', cancel: '🛑 Cancel task' }, { approve: '✅ យល់ព្រម', reject: '❌ បដិសេធ', cancel: '🛑 បោះបង់' }),
 
-  approved: (env, taskId) => pick(env, `Approved ${taskId}. Queued; you'll get a message when the GitHub job starts.`, '✅ យល់ព្រមហើយ — កំពុងដំណើរការ…'),
+  approved: (env, taskId) => pick(env, `Approved ${taskId}. Running now; you'll get a message when it finishes.`, '✅ យល់ព្រមហើយ — កំពុងដំណើរការ…'),
   rejected: (env, taskId, prClosed) => pick(env, `Rejected ${taskId}. ${prClosed ? 'The pull request was closed.' : 'Nothing dispatched.'}`, `❌ បានបដិសេធ។${prClosed ? ' PR ត្រូវបានបិទ។' : ''}`),
   expired: env => pick(env, 'This approval expired, so nothing was dispatched. Send the /task again.', '⏳ ការយល់ព្រមនេះផុតកំណត់ហើយ។ សូមផ្ញើម្តងទៀត។'),
   enqueueFailed: env => pick(env, 'Approval recorded, but the job could not be queued; see the error above.', '⚠️ យល់ព្រមហើយ ប៉ុន្តែមិនអាចដាក់ចូល queue បាន។'),
@@ -55,7 +55,6 @@ export const T = {
   cannotCancel: (env, status) => pick(env, `Cannot cancel: task is ${status}.`, `មិនអាចបោះបង់បាន (status: ${status})។`),
 
   // Execution reports
-  jobStarted: (env, taskId, label) => pick(env, `🚀 Task ${taskId}: GitHub Actions ${label} started. You'll get a message when it finishes.`, `🚀 ${label} បានចាប់ផ្តើម · ${short(taskId)}`),
   jobDone: (env, taskId, state, note, url, demo, prUrl = '') => pick(env,
     `Task ${taskId}: ${state}\n${note}\n${url}${demo ? '\n\nDemo job only. No public post or Laravel upload performed.' : prUrl ? `\n\nDraft pull request (not merged): ${prUrl}` : '\n\nNo pull request was created.'}`,
     `${state === 'completed' ? '✅' : '❌'} ${short(taskId)}: ${state}\n${note}${url ? `\n${url}` : ''}${prUrl ? `\nPR (draft): ${prUrl}` : ''}`),
@@ -77,7 +76,7 @@ export const T = {
 
   // Books
   requestAlert: (env, r) => `${note(env, 'request')}\n` + pick(env, `📚 #${r.id} ${r.book_title}${r.author ? ` — ${r.author}` : ''}${r.language ? ` (${r.language})` : ''}`, `📚 #${r.id} ${r.book_title}${r.author ? ` — ${r.author}` : ''}`),
-  requestButtons: env => pick(env, { find: '🔎 Find a legal copy', reject: '🚫 Reject request' }, { find: '🔎 ស្វែងរក', reject: '🚫 បដិសេធ' }),
+  requestButtons: env => ({ find: pick(env, '🔎 Find a legal copy', '🔎 ស្វែងរក'), reject: T.buttons(env).reject }),
   watching: (env, cursor) => pick(env, `👀 Watching booksharekh.com book requests from #${cursor} onward. New requests will appear here.`, `👀 កំពុងតាមដានសំណើសៀវភៅ (ចាប់ពី #${cursor})។`),
   candidates: env => pick(env,
     { head: q => `📚 Public-domain matches for "${q}" (Project Gutenberg):`, foot: 'Tap one to prepare a private draft. Nothing is published without your second approval.', button: i => `📥 Prepare draft ${i}`,
@@ -102,8 +101,8 @@ ${url}` : ''}`, `${ok ? '✅ បាន deploy ទៅ booksharekh.com ហើយ�
 ${note}${url ? `
 ${url}` : ''}`),
   deployNothing: env => pick(env, 'Nothing new to deploy: main has no commits.', 'មិនមានអ្វីថ្មីសម្រាប់ deploy ទេ។'),
-  noPending: env => pick(env, 'No pending book requests.', 'មិនមានសំណើសៀវភៅរង់ចាំទេ។'),
-  requestRejected: (env, id) => pick(env, `Book request #${id} rejected.`, `🚫 សំណើ #${id} ត្រូវបានបដិសេធ។`),
+  noPending: env => pick(env, 'No pending book requests.', 'គ្មានសំណើសៀវភៅរង់ចាំ'),
+  requestRejected: (env, id) => pick(env, `❌ Book request #${id} rejected.`, `❌ សំណើ #${id} បានបដិសេធ`),
 
   // Top-ups (money): show exactly what will be credited.
   topupAlert: (env, t) => {
@@ -111,11 +110,11 @@ ${url}` : ''}`),
       t.transaction_id ? `🧾 ${t.transaction_id}` : '', t.notes ? `📝 ${t.notes}` : '', t.has_image ? '' : pick(env, '⚠️ No receipt image', '⚠️ គ្មានរូបវិក្កយបត្រ')];
     return [...lines.filter(Boolean), '', pick(env, '👉 Approve and credit this balance?', '👉 បញ្ចូលលុយ?')].join('\n');
   },
-  topupButtons: env => pick(env, { approve: '✅ Approve', reject: '❌ Reject' }, { approve: '✅ យល់ព្រម', reject: '❌ បដិសេធ' }),
+  topupButtons: env => T.buttons(env), // same Approve / Reject buttons as everywhere else
   topupApproved: (env, t, balance) => pick(env, `✅ Top-up #${t.id} approved: +${t.amount} ${t.currency} for ${t.user}. Balance: ${balance}`,
-    `✅ Topup #${t.id} +${t.amount} ${t.currency} · ${t.user} (សមតុល្យ ${balance})`),
-  topupRejected: (env, id) => pick(env, `❌ Top-up #${id} rejected. No balance added.`, `❌ Topup #${id} បានបដិសេធ`),
-  topupProblem: (env, id, msg) => pick(env, `⚠️ Top-up #${id}: ${msg}`, `⚠️ Topup #${id}: ${msg}`),
+    `✅ Top-up #${t.id} +${t.amount} ${t.currency} · ${t.user} (សមតុល្យ ${balance})`),
+  topupRejected: (env, id) => pick(env, `❌ Top-up #${id} rejected. No balance added.`, `❌ Top-up #${id} បានបដិសេធ`),
+  topupProblem: (env, id, msg) => pick(env, `⚠️ Top-up #${id}: ${msg}`, `⚠️ Top-up #${id}: ${msg}`),
   topupUnknown: env => pick(env, 'This top-up is no longer in my list. Send /topups to see pending ones.', 'រកមិនឃើញ។ សូមវាយ /topups'),
   // Users: one short message per check, only when something happened.
   userActivity: (env, reg, logins, total) => [
@@ -159,7 +158,6 @@ const KM_SHORT = {
   approved: () => '✅ កំពុងដំណើរការ…',
   rejected: (taskId, prClosed) => (prClosed ? '❌ បានបដិសេធ · PR បិទ' : '❌ បានបដិសេធ'),
   cancelled: () => '🛑 បានបោះបង់',
-  jobStarted: () => '🚀 កំពុងដំណើរការ…',
   jobDone: (taskId, state, note, url, demo, prUrl) => (state === 'completed' ? `✅ រួចរាល់${note && !demo ? `\n${note}` : ''}` : `❌ បរាជ័យ: ${note}`),
   merged: n => `✅ Merged PR #${n}`,
   planFailed: (task, msg) => `⚠️ រៀបចំផែនការមិនបាន: ${msg}`,

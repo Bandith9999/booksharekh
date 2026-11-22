@@ -227,7 +227,7 @@ test('/develop: plan → approval bound to the website repo → Laravel Develope
   assert.equal(dispatch.length, 1);
   assert.deepEqual(dispatch[0].body, { ref: 'main', inputs: { task_id: task.id } });
   assert.equal(latestTask(env).status, 'running');
-  assert.match(lastText(calls), /Laravel Developer job started/);
+  assert.match(lastText(calls), /Approved .* Running now/, 'one message after approval, no separate "started" message');
 
   const got = await (await job(env, 'GET', `/job/${task.id}`)).json();
   assert.equal(got.task_type, 'website_code_change');
