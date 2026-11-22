@@ -2,7 +2,7 @@
 import { clamp, githubHint, sha256Hex } from '../helpers.js';
 import { audit, latestArtifact, newId } from '../db.js';
 import { notifyTaskOwner } from '../telegram.js';
-import { consumeApproval, finishApproval, releaseApproval } from './approvals.js';
+import { consumeApproval, consumeStepApproval, finishApproval, releaseApproval } from './approvals.js';
 import { transition } from './state-machine.js';
 
 const HTTP_TIMEOUT_MS = 15000;
@@ -91,4 +91,73 @@ export async function runGithubJob(env, task, agentTask, action = null) {
   await transition(env.DB, 'tasks', task.id, 'running');
   await audit(env, task.id, 'DISPATCHED', 'worker', `${wf.repo(env)}/${wf.file} approval=${approval.id}`);
   await notifyTaskOwner(env, task, `🚀 Task ${task.id}: GitHub Actions ${wf.label} started. You'll get a message when it finishes.`);
+}
+
+// ---------- Merging an approved Laravel Developer pull request ----------
+const websiteApi = env => `https://api.github.com/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(env.WEBSITE_REPO || '')}`;
+export const prNumberFromUrl = url => Number(String(url || '').match(/\/pull\/(\d+)$/)?.[1]) || null;
+
+async function codeChangeOutput(env, taskId) {
+  const row = await env.DB.prepare("SELECT output FROM agent_tasks WHERE task_id=? AND action='code_change_job' AND status='completed'").bind(taskId).first();
+  let out = null; try { out = JSON.parse(row?.output || 'null'); } catch { /* ignore */ }
+  if (!out?.pr_url || !/^[0-9a-f]{40}$/.test(out.head_sha || '')) throw new JobError('The pull request is not ready');
+  return out;
+}
+
+// What the owner approves: merge exactly this commit of this PR.
+export async function mergePayload(env, task) {
+  const out = await codeChangeOutput(env, task.id);
+  return { action: 'merge_pull_request', repo: `${env.GITHUB_OWNER}/${env.WEBSITE_REPO}`, pr_number: prNumberFromUrl(out.pr_url), head_sha: out.head_sha };
+}
+
+// Telegram review text: changed files and the first changed lines, so the owner can decide without GitHub.
+export async function prReviewText(env, prUrl, headSha, note) {
+  const n = prNumberFromUrl(prUrl);
+  const lines = [`🔍 Pull request #${n} is ready: ${prUrl}`, `Commit ${headSha.slice(0, 12)} · ${clamp(note, 150)}`];
+  try {
+    const r = await fetch(`${websiteApi(env)}/pulls/${n}/files?per_page=30`, { headers: githubHeaders(env), signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+    const files = r.ok ? await r.json() : [];
+    if (!files.length) throw new Error('no files');
+    lines.push('', `Changed files (${files.length}):`, ...files.slice(0, 10).map(f => `• ${f.filename} (+${f.additions} −${f.deletions})`));
+    const changed = files.flatMap(f => String(f.patch || '').split('\n').filter(l => /^[+-](?![+-])/.test(l)).map(l => clamp(l.replace(/\s+/g, ' '), 110)));
+    lines.push('', 'Changes:', ...changed.slice(0, 20));
+    if (changed.length > 20) lines.push(`… ${changed.length - 20} more changed lines (see the PR)`);
+  } catch { lines.push('', 'The diff could not be loaded here; open the link to review it.'); }
+  lines.push('', 'Checks passed in the Laravel Developer job (PHP lint, tests, secret scan).');
+  return lines.join('\n');
+}
+
+export async function runGithubMerge(env, task, agentTask) {
+  const payload = await mergePayload(env, task);
+  const approval = await consumeStepApproval(env, agentTask.id, payload);
+  try {
+    let r;
+    try {
+      r = await fetch(`${websiteApi(env)}/pulls/${payload.pr_number}/merge`, {
+        method: 'PUT', headers: { ...githubHeaders(env), 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+        body: JSON.stringify({ sha: payload.head_sha, merge_method: 'squash', commit_title: `${clamp(task.request_text, 60)} (#${payload.pr_number})` }),
+      });
+    } catch { throw new JobError('GitHub merge outcome unknown (network). Check the pull request before retrying.'); }
+    const body = await r.json().catch(() => ({}));
+    if (r.status === 409) throw new JobError('The pull request changed after your approval, so it was not merged.');
+    if (r.status === 405) throw new JobError(`GitHub says the pull request cannot be merged: ${clamp(body.message, 120)}`);
+    if (r.status === 403 || r.status === 404) throw new JobError(`GitHub refused the merge (HTTP ${r.status}). Give the token Contents: Read and write and Pull requests: Read and write on ${env.WEBSITE_REPO}.`);
+    if (!r.ok || !body.merged) throw new JobError(`GitHub merge failed (HTTP ${r.status}): ${clamp(body.message, 120)}`, { retryable: r.status >= 500 });
+    await finishApproval(env, approval.id, true);
+    await audit(env, task.id, 'PR_MERGED', 'worker', `#${payload.pr_number} ${payload.head_sha} -> ${body.sha}`);
+    await notifyTaskOwner(env, task, `✅ Merged pull request #${payload.pr_number} into main (commit ${String(body.sha).slice(0, 12)}).\nThe live site has not changed yet; deploying is a separate step.`).catch(() => {});
+    return { merged_sha: body.sha, pr_number: payload.pr_number };
+  } catch (e) {
+    if (e?.retryable) await releaseApproval(env, approval.id); else await finishApproval(env, approval.id, false);
+    throw e;
+  }
+}
+
+export async function closePullRequest(env, taskId) {
+  const out = await codeChangeOutput(env, taskId).catch(() => null);
+  const n = prNumberFromUrl(out?.pr_url);
+  if (!n) return false;
+  const r = await fetch(`${websiteApi(env)}/pulls/${n}`, { method: 'PATCH', headers: { ...githubHeaders(env), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ state: 'closed' }), signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) }).catch(() => null);
+  return Boolean(r?.ok);
 }

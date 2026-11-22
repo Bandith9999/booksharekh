@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { prepareExport } from '../website-kit/prepare-export.mjs';
 import {
-  approvals, approveButton, drain, job, lastText, latestTask, makeEnv, mockFetch, msg, planTask, press, routes, steps, telegram,
+  approvals, approveButton, drain, job, lastText, latestTask, makeEnv, mockFetch, msg, planTask, press, routes, sent, steps, telegram,
 } from './harness.mjs';
 
 const SITE = /^https:\/\/booksharekh\.com/;
@@ -77,16 +77,90 @@ test('/develop is refused until the website repository is connected', async () =
   assert.equal(latestTask(env), undefined);
 });
 
+// GitHub API for the website repo: dispatch, PR files, merge, close.
+function githubSite(state = {}) {
+  return [/^https:\/\/api\.github\.com\/repos\/owner\/booksharekh-website\//, (url, init) => {
+    const p = new URL(url).pathname; const method = init.method || 'GET';
+    if (p.endsWith('/actions/workflows/laravel-developer.yml/dispatches')) return new Response(null, { status: 204 });
+    if (p.endsWith('/pulls/3/files')) return Response.json([{ filename: 'resources/views/frontend/home.blade.php', additions: 1, deletions: 1,
+      patch: '@@ -10 +10 @@\n-   Most Viewed Books\n+   Most Viewed Book' }]);
+    if (p.endsWith('/pulls/3/merge') && method === 'PUT') {
+      state.merge = JSON.parse(init.body);
+      return state.mergeStatus ? Response.json({ message: 'Head branch was modified' }, { status: state.mergeStatus }) : Response.json({ merged: true, sha: 'c'.repeat(40) });
+    }
+    if (p.endsWith('/pulls/3') && method === 'PATCH') { state.closed = JSON.parse(init.body); return Response.json({ state: 'closed' }); }
+    return new Response('nf', { status: 404 });
+  }];
+}
+
+// Runs /develop up to the merge approval (PR opened by the job). Returns task, calls, state.
+async function developToMergeApproval(state = {}) {
+  const env = makeEnv({ WEBSITE_REPO: 'booksharekh-website' });
+  const calls = mockFetch([routes.telegram, githubSite(state)]);
+  await telegram(env, msg('/develop rename "Most Viewed Books" to Book without s'));
+  await drain(env);
+  await telegram(env, press(approveButton(calls)));
+  await drain(env);
+  const task = latestTask(env);
+  await job(env, 'POST', '/job-result', { task_id: task.id, status: 'completed', note: 'Pull request opened. PHP lint: pass, tests: pass.',
+    run_url: 'https://github.com/owner/booksharekh-website/actions/runs/9', pr_url: 'https://github.com/owner/booksharekh-website/pull/3', head_sha: 'a'.repeat(40) });
+  return { env, calls, task, state };
+}
+
+test('/develop: approved merge merges exactly the reviewed commit; nothing is deployed', async () => {
+  const { env, calls, task, state } = await developToMergeApproval();
+  assert.equal(latestTask(env).status, 'awaiting_approval', 'waits for the owner after the PR is opened');
+  const review = sent(calls).at(-1);
+  assert.match(review.text, /🔍 Pull request #3 is ready[\s\S]*resources\/views\/frontend\/home\.blade\.php \(\+1 −1\)[\s\S]*- Most Viewed Books\n\+ Most Viewed Book[\s\S]*Proposed action: Merge this pull request/);
+  assert.match(review.reply_markup.inline_keyboard[0][0].callback_data, /^ap:APR-/);
+  const mergeAp = approvals(env, task.id).find(a => a.action_type === 'merge_pull_request');
+  assert.equal(JSON.parse(mergeAp.payload).head_sha, 'a'.repeat(40));
+
+  await telegram(env, press(approveButton(calls)));
+  await drain(env);
+  assert.deepEqual([state.merge.sha, state.merge.merge_method], ['a'.repeat(40), 'squash'], 'merges only the approved commit');
+  assert.equal(latestTask(env).status, 'completed');
+  assert.match(sent(calls).map(m => m.text).join('\n'), /✅ Merged pull request #3 into main \(commit cccccccccccc\)[\s\S]*live site has not changed/);
+});
+
+test('/develop: Reject closes the pull request; a PR changed after approval is not merged', async () => {
+  const a = await developToMergeApproval();
+  const reject = sent(a.calls).at(-1).reply_markup.inline_keyboard[0][1].callback_data;
+  await telegram(a.env, press(reject));
+  assert.deepEqual(a.state.closed, { state: 'closed' });
+  assert.match(lastText(a.calls), /Rejected .* The pull request was closed\./);
+  assert.equal(a.state.merge, undefined);
+
+  const b = await developToMergeApproval({ mergeStatus: 409 });
+  await telegram(b.env, press(approveButton(b.calls)));
+  await drain(b.env);
+  assert.equal(latestTask(b.env).status, 'failed');
+  assert.match(lastText(b.calls), /changed after your approval, so it was not merged/);
+});
+
+test('/develop: a failed job cancels the merge step', async () => {
+  const env = makeEnv({ WEBSITE_REPO: 'booksharekh-website' });
+  const calls = mockFetch([routes.telegram, githubSite()]);
+  await telegram(env, msg('/develop break things'));
+  await drain(env);
+  await telegram(env, press(approveButton(calls)));
+  await drain(env);
+  const task = latestTask(env);
+  await job(env, 'POST', '/job-result', { task_id: task.id, status: 'failed', note: 'tests failed' });
+  assert.equal(latestTask(env).status, 'failed');
+  assert.deepEqual(steps(env, task.id).map(s => s.status), ['completed', 'failed', 'cancelled']);
+});
+
 test('/develop: plan → approval bound to the website repo → Laravel Developer job → PR link, nothing deployed', async () => {
   const env = makeEnv({ WEBSITE_REPO: 'booksharekh-website' });
-  const calls = mockFetch([routes.telegram, [/\/repos\/owner\/booksharekh-website\/actions\/workflows\/laravel-developer\.yml\/dispatches$/, () => new Response(null, { status: 204 })]]);
+  const calls = mockFetch([routes.telegram, githubSite()]);
   await telegram(env, msg('/develop Change the homepage heading to "Welcome to BookShareKH"'));
   assert.match(lastText(calls), /Website task BSK-.* received/);
   await drain(env);
   const task = latestTask(env);
   assert.equal(task.task_type, 'website_code_change');
   assert.equal(task.status, 'awaiting_approval');
-  assert.deepEqual(steps(env, task.id).map(s => `${s.agent}.${s.action}`), ['manager.plan', 'laravel_developer.code_change_job']);
+  assert.deepEqual(steps(env, task.id).map(s => `${s.agent}.${s.action}`), ['manager.plan', 'laravel_developer.code_change_job', 'laravel_developer.merge_pr']);
   const ap = approvals(env, task.id)[0];
   assert.equal(ap.action_type, 'dispatch_code_change');
   assert.deepEqual([JSON.parse(ap.payload).repo, JSON.parse(ap.payload).workflow], ['owner/booksharekh-website', 'laravel-developer.yml']);
@@ -110,8 +184,8 @@ test('/develop: plan → approval bound to the website repo → Laravel Develope
   const done = await job(env, 'POST', '/job-result', { task_id: task.id, status: 'completed', note: 'Pull request opened. PHP lint: pass, tests: pass.',
     run_url: 'https://github.com/owner/booksharekh-website/actions/runs/9', pr_url: 'https://github.com/owner/booksharekh-website/pull/3', head_sha: sha });
   assert.equal(done.status, 200);
-  assert.equal(latestTask(env).status, 'completed');
-  assert.match(lastText(calls), /Pull request for review: https:\/\/github\.com\/owner\/booksharekh-website\/pull\/3\nCommit aaaaaaaaaaaa\nNothing has been deployed/);
+  assert.equal(latestTask(env).status, 'awaiting_approval', 'next: the owner approves the merge');
+  assert.match(lastText(calls), /Pull request #3 is ready: https:\/\/github\.com\/owner\/booksharekh-website\/pull\/3\nCommit aaaaaaaaaaaa/);
   const pr = env.DB.db.prepare("SELECT uri, content FROM task_artifacts WHERE task_id=? AND kind='pull_request'").get(task.id);
   assert.deepEqual(JSON.parse(pr.content), { pr_url: 'https://github.com/owner/booksharekh-website/pull/3', head_sha: sha });
 });

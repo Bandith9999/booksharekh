@@ -3,6 +3,8 @@
 import { clamp, safeTaskId } from './helpers.js';
 import { addArtifact, audit } from './db.js';
 import { reply } from './telegram.js';
+import { advance } from './orchestration/engine.js';
+import { prReviewText } from './orchestration/github.js';
 import { handleCallback, handleMessage } from './commands.js';
 import { handleQueueBatch } from './orchestration/queue-consumer.js';
 import { pollBookRequests } from './books/requests.js';
@@ -49,9 +51,12 @@ async function finishJob(request, env) {
   if (prUrl && !/^https:\/\/github\.com\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+\/pull\/\d+$/.test(prUrl)) return json({ error: 'bad PR URL' }, 400);
   const headSha = data.head_sha ? String(data.head_sha) : '';
   if (headSha && !/^[0-9a-f]{40}$/.test(headSha)) return json({ error: 'bad commit SHA' }, 400);
+  // A website change that opened a PR is not finished: it continues to the owner's merge approval.
+  const current = await env.DB.prepare('SELECT task_type FROM tasks WHERE id=?').bind(data.task_id).first();
+  const toMerge = current?.task_type === 'website_code_change' && state === 'completed' && prUrl && headSha;
   const row = await env.DB.prepare(`UPDATE tasks SET status=?,result_url=?,result_note=?,updated_at=CURRENT_TIMESTAMP
       WHERE id=? AND status IN ('queued','dispatching','running') RETURNING telegram_user_id, task_type`)
-    .bind(state, url, note, data.task_id).first();
+    .bind(toMerge ? 'running' : state, url, note, data.task_id).first();
   if (!row) return json({ error: 'unknown or already completed task' }, 409);
   // Phase 2 bookkeeping; these match nothing for tasks created before Phase 2.
   await env.DB.prepare(`UPDATE agent_tasks SET status=?, output=?, error=?, finished_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
@@ -62,6 +67,12 @@ async function finishJob(request, env) {
   if (url) await addArtifact(env, { taskId: data.task_id, kind: 'github_run', uri: url, contentType: 'text/uri-list' });
   if (prUrl) await addArtifact(env, { taskId: data.task_id, kind: 'pull_request', uri: prUrl, content: JSON.stringify({ pr_url: prUrl, head_sha: headSha || null }) });
   await audit(env, data.task_id, 'JOB_' + state.toUpperCase(), 'github-actions', clamp(data.note, 250));
+  if (state === 'failed') await env.DB.prepare("UPDATE agent_tasks SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE task_id=? AND status='pending'").bind(data.task_id).run();
+  if (toMerge) {
+    await env.DB.prepare('UPDATE tasks SET proposal=?, updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(clamp(await prReviewText(env, prUrl, headSha, note), 3000), data.task_id).run();
+    await advance(env, data.task_id); // sends the diff with Approve (merge) / Reject (close PR)
+    return json({ ok: true });
+  }
   const tail = row.task_type === 'website_code_change'
     ? (prUrl ? `\n\nPull request for review: ${prUrl}${headSha ? `\nCommit ${headSha.slice(0, 12)}` : ''}\nNothing has been deployed. Deployment is a separate approval for this exact commit.` : '\n\nNo pull request was created.')
     : '\n\nDemo job only. No public post or Laravel upload performed.';

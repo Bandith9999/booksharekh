@@ -184,7 +184,7 @@ async function startImport(env, userId, gutenbergId, requestId) {
 function decisionText(kind, r) {
   if (r.ok) return kind === 'approve'
     ? `Approved ${r.approval.task_id}. Queued; you'll get a message when the GitHub job starts.`
-    : `Rejected ${r.approval.task_id}. Nothing dispatched.`;
+    : `Rejected ${r.approval.task_id}. ${r.prClosed ? 'The pull request was closed.' : 'Nothing dispatched.'}`;
   if (r.reason === 'expired') return 'This approval expired, so nothing was dispatched. Send the /task again.';
   if (r.reason === 'enqueue_failed') return 'Approval recorded, but the job could not be queued; see the error above.';
   return 'This decision has already been handled, or the task cannot be approved.';

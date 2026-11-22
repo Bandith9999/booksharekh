@@ -86,10 +86,17 @@ const LIST = [
     maxAttempts: 2, allowFallback: false, maxOutputTokens: 8000, outputSchema: null,
     // Code is edited by Claude Code inside GitHub Actions on the private website repo (Claude subscription),
     // never sent to the Worker's free-tier model. The job opens a pull request; it never deploys.
-    actions: { code_change_job: {
-      kind: 'github_job', tool: 'github_pull_request', workflow: 'website_dev', requiresApproval: true, approvalAction: 'dispatch_code_change',
-      description: 'Run the Laravel Developer on the private website repo: new branch, code change, tests, pull request. Nothing is deployed.',
-    } },
+    actions: {
+      code_change_job: {
+        kind: 'github_job', tool: 'github_pull_request', workflow: 'website_dev', requiresApproval: true, approvalAction: 'dispatch_code_change',
+        description: 'Run the Laravel Developer on the private website repo: new branch, code change, tests, pull request. Nothing is deployed.',
+      },
+      // Owner approves merging the exact reviewed commit into main (GitHub refuses if the PR changed).
+      merge_pr: {
+        kind: 'github_merge', tool: 'github_pull_request', requiresApproval: true, approvalAction: 'merge_pull_request',
+        description: 'Merge this pull request into main on the website repo. The live site does not change until it is deployed.',
+      },
+    },
   },
   {
     name: 'qa_reviewer', title: 'QA Reviewer', tier: 'review', phase: 3,
@@ -124,7 +131,7 @@ export function validateRegistry() {
     if (!(a.maxAttempts >= 1 && a.maxAttempts <= 5)) errors.push(`${a.name}: maxAttempts out of range`);
     for (const t of a.allowedTools) if (!TOOLS[t]) errors.push(`${a.name}: unknown tool ${t}`);
     for (const [n, act] of Object.entries(a.actions)) {
-      if (!['ai', 'github_job', 'book_draft', 'book_publish'].includes(act.kind)) errors.push(`${a.name}.${n}: unknown action kind ${act.kind}`);
+      if (!['ai', 'github_job', 'github_merge', 'book_draft', 'book_publish'].includes(act.kind)) errors.push(`${a.name}.${n}: unknown action kind ${act.kind}`);
       if (act.tool && !a.allowedTools.includes(act.tool)) errors.push(`${a.name}.${n}: tool ${act.tool} not in allowedTools`);
       if (act.tool && !TOOLS[act.tool]?.implemented) errors.push(`${a.name}.${n}: tool ${act.tool} not implemented`);
       if (act.kind !== 'ai' && !act.requiresApproval) errors.push(`${a.name}.${n}: external action without approval`);

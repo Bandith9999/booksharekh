@@ -7,7 +7,7 @@ import { DEMO_JOB_STEP, getAction, getAgent } from '../agents/registry.js';
 import { runAIAction } from '../agents/runner.js';
 import { keyboards, notifyTaskOwner } from '../telegram.js';
 import { decide, requestApproval, revokeOpenApprovals } from './approvals.js';
-import { jobPayload, runGithubJob } from './github.js';
+import { closePullRequest, jobPayload, mergePayload, runGithubJob, runGithubMerge } from './github.js';
 import { draftPayload, publishPayload, runBookDraft, runBookPublish } from '../books/importer.js';
 import { SQL_NOW, TASK, isTerminal, transition } from './state-machine.js';
 
@@ -85,7 +85,9 @@ export async function createTask(env, { userId, description, type: forcedType = 
     .bind(id, String(userId), clamp(description, 2000), type, '(planning)', 'planning').run();
   const planId = await insertStep(env, { taskId: id, agent: 'manager', action: 'plan', status: 'queued' });
   const job = DEMO_JOB_STEP[type];
-  await insertStep(env, { taskId: id, agent: job.agent, action: job.action, status: 'pending', dependsOn: [planId] });
+  const jobId = await insertStep(env, { taskId: id, agent: job.agent, action: job.action, status: 'pending', dependsOn: [planId] });
+  // Website changes: after the PR is opened, the owner approves merging that exact commit.
+  if (type === 'website_code_change') await insertStep(env, { taskId: id, agent: 'laravel_developer', action: 'merge_pr', status: 'pending', dependsOn: [jobId] });
   await audit(env, id, 'TASK_CREATED', userId, type);
   try {
     await enqueueStep(env, planId);
@@ -115,6 +117,7 @@ async function payloadFor(env, task, action, step = null) {
   if (action.kind === 'github_job') return jobPayload(env, task, action);
   if (action.kind === 'book_draft') return draftPayload(task, step);
   if (action.kind === 'book_publish') return publishPayload(env, task);
+  if (action.kind === 'github_merge') return mergePayload(env, task);
   throw new Error(`No approval payload for action kind ${action.kind}`);
 }
 
@@ -159,9 +162,10 @@ export async function runAgentTask(env, agentTaskId) {
       await advance(env, task.id);
     } else if (action.kind === 'github_job') {
       await runGithubJob(env, task, at, action);
-    } else if (action.kind === 'book_draft' || action.kind === 'book_publish') {
+    } else if (['book_draft', 'book_publish', 'github_merge'].includes(action.kind)) {
       await transition(env.DB, 'tasks', task.id, 'running', { from: ['queued'] });
-      const output = action.kind === 'book_draft' ? await runBookDraft(env, task, at) : await runBookPublish(env, task, at);
+      const run = { book_draft: runBookDraft, book_publish: runBookPublish, github_merge: runGithubMerge }[action.kind];
+      const output = await run(env, task, at);
       await transition(env.DB, 'agent_tasks', at.id, 'completed', { from: ['running'], set: { output: JSON.stringify(output), error: null, finished_at: SQL_NOW } });
       await audit(env, task.id, 'STEP_COMPLETED', 'worker', `${at.agent}.${at.action}`);
       await advance(env, task.id);
@@ -266,7 +270,8 @@ export async function rejectStep(env, approvalId, userId) {
   await transition(env.DB, 'tasks', ap.task_id, 'rejected');
   await cancelOpenSteps(env, ap.task_id);
   await audit(env, ap.task_id, 'REJECT', userId, `${ap.action_type} ${ap.id}`);
-  return { ok: true, approval: ap };
+  const prClosed = ap.action_type === 'merge_pull_request' ? await closePullRequest(env, ap.task_id).catch(() => false) : false;
+  return { ok: true, approval: ap, prClosed };
 }
 
 // Phase 1 buttons (approve:/reject:<task id>) on tasks still in legacy 'pending'.
