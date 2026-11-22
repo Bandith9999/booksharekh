@@ -1,0 +1,23 @@
+{
+	"name": "booksharekh-ai-manager",
+	"main": "src/index.js",
+	"compatibility_date": "2026-10-01",
+	"observability": {
+		"enabled": true
+	},
+	"d1_databases": [
+  {
+    "binding": "DB",
+    "database_name": "booksharekh-ai-db",
+    "database_id": "b53158e2-465c-4324-b395-c90bb1a46300",
+    "migrations_dir": "migrations"
+  }
+],
+	"vars": {
+		"OWNER_TELEGRAM_ID": "802529780",
+		"GITHUB_OWNER": "REPLACE_WITH_GITHUB_OWNER",
+		"GITHUB_REPO": "booksharekh-ai-manager",
+		"AI_PROVIDER": "mock",
+		"AI_MODEL": "gpt-4.1-mini"
+	}
+}

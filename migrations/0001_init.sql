@@ -1,0 +1,31 @@
+CREATE TABLE IF NOT EXISTS memories (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  telegram_user_id TEXT NOT NULL,
+  request_text TEXT NOT NULL,
+  task_type TEXT NOT NULL,
+  proposal TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  approved_at TEXT,
+  result_url TEXT,
+  result_note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_recent ON tasks(created_at DESC);
+CREATE TABLE IF NOT EXISTS telegram_updates (
+  update_id INTEGER PRIMARY KEY,
+  received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT,
+  event TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  details TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

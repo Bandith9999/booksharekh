@@ -1,0 +1,37 @@
+name: BookShareKH approved demo job
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: Approved D1 task ID
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: booksharekh-job-${{ inputs.task_id }}
+  cancel-in-progress: false
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - name: Process approved job
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          JOB_CALLBACK_SECRET: ${{ secrets.JOB_CALLBACK_SECRET }}
+          TASK_ID: ${{ inputs.task_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/process_job.py
+      - name: Upload demo artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: booksharekh-demo-${{ github.run_id }}
+          path: output/
+          if-no-files-found: ignore
+          retention-days: 7
