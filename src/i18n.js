@@ -118,7 +118,7 @@ ${url}` : ''}`),
   topupUnknown: env => pick(env, 'This top-up is no longer in my list. Send /topups to see pending ones.', 'រកមិនឃើញ។ សូមវាយ /topups'),
   // Users: one short message per check, only when something happened.
   userActivity: (env, reg, logins, total) => [
-    reg ? `${note(env, 'member')}\n🆕 ${reg}` : '',
+    reg ? `${note(env, 'member')}\n${reg}` : '',
     logins ? `${note(env, 'login')}\n🔑 ${logins}` : '',
     pick(env, `👥 Total users: ${total}`, `👥 សរុប ${total} នាក់`),
   ].filter(Boolean).join('\n\n'),

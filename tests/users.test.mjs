@@ -33,13 +33,13 @@ test('first check is silent; then one short message with new users, logins and t
   assert.equal(s.state.asked[0].since, '2000-01-01 00:00:00');
 
   s.state.activity = {
-    registered: [{ user: 'dara', country: 'Cambodia', via: 'google' }],
+    registered: [{ user: 'dara', email: 'dara@example.com', country: 'Cambodia', via: 'google' }, { user: 'nita' }],
     logins: [{ user: 'sok' }, { user: 'vanna' }],
   };
   s.state.total = 1234;
   await worker.scheduled({}, e, {});
   assert.equal(s.state.asked[1].since, '2026-11-22 10:00:01', 'continues from the site time it returned');
-  assert.equal(lastText(calls), '*** សមាជិកថ្មី ***\n🆕 dara (Cambodia · Google)\n\n*** Login ***\n🔑 sok, vanna\n\n👥 សរុប 1,234 នាក់');
+  assert.equal(lastText(calls), '*** សមាជិកថ្មី ***\n🆕 dara@example.com · dara\n🆕 nita\n\n*** Login ***\n🔑 sok, vanna\n\n👥 សរុប 1,234 នាក់');
 
   const before = sent(calls).length;
   await worker.scheduled({}, e, {});
