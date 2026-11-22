@@ -116,3 +116,37 @@ export const tr = (value, fallback) => (value == null ? fallback : value);
 export const planLanguageRule = env => (isKhmer(env)
   ? '\nWrite summary, objectives and risks in Khmer (Khmer script). Keep technical terms in English (pull request, commit, deploy, Laravel, Blade, EPUB, PDF, GitHub). Be brief: summary under 40 words, at most 3 steps, at most 3 risks.'
   : '');
+
+// ---- Minimal Khmer (owner request): only what is needed to decide. No links, IDs, commits or timers. ----
+const KM_SHORT = {
+  taskReceived: () => '📝 កំពុងរៀបចំផែនការ…',
+  developReceived: () => '📝 កំពុងរៀបចំផែនការ…',
+  approval: (task, proposal, actionText) => `${proposal}\n\n👉 ${actionText}`,
+  approved: () => '✅ កំពុងដំណើរការ…',
+  rejected: (taskId, prClosed) => (prClosed ? '❌ បានបដិសេធ · PR បិទ' : '❌ បានបដិសេធ'),
+  cancelled: () => '🛑 បានបោះបង់',
+  jobStarted: () => '🚀 កំពុងដំណើរការ…',
+  jobDone: (taskId, state, note, url, demo, prUrl) => (state === 'completed' ? `✅ រួចរាល់${note && !demo ? `\n${note}` : ''}` : `❌ បរាជ័យ: ${note}`),
+  merged: n => `✅ Merged PR #${n}`,
+  planFailed: (task, msg) => `⚠️ រៀបចំផែនការមិនបាន: ${msg}`,
+  stepFailed: (task, step, msg) => `❌ ${msg}`,
+  preparing: () => '📥 កំពុងរៀបចំ draft…',
+  draftPreview: b => [`📖 ${b.title} — ${b.author}`, `EPUB ${b.mb}MB${b.cover ? ' + គម្រប' : ''} · public domain`, b.dups ? `⚠️ មានរួចហើយ (#${b.dups})` : ''].filter(Boolean).join('\n'),
+  published: (p, bookId, slug, requestNote) => `✅ បាន publish "${p.title}"${requestNote}`,
+  requestDone: () => ' · សំណើរួចរាល់',
+  deployDone: (ok, note) => (ok ? '✅ បាន deploy រួច' : `❌ Deploy បរាជ័យ: ${note}`),
+};
+for (const [key, short] of Object.entries(KM_SHORT)) {
+  const full = T[key];
+  T[key] = (env, ...args) => (isKhmer(env) ? short(...args) : full(env, ...args));
+}
+
+// Short Khmer "👉" questions for each approval, by action type.
+export const KM_ACTION = {
+  dispatch_github_job: 'ដំណើរការ?',
+  dispatch_code_change: 'ឲ្យ AI កែកូដ?',
+  merge_pull_request: 'Merge?',
+  deploy_website: 'Deploy ទៅវេបសាយ?',
+  prepare_book_draft: 'រៀបចំ draft?',
+  publish_book: 'Publish លើវេបសាយ?',
+};

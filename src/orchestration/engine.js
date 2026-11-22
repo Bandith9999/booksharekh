@@ -6,7 +6,7 @@ import { audit, getAgentOverride, getAgentTask, getTask, listAgentTasks, listDep
 import { DEMO_JOB_STEP, getAction, getAgent } from '../agents/registry.js';
 import { runAIAction } from '../agents/runner.js';
 import { keyboards, notifyTaskOwner } from '../telegram.js';
-import { T, isKhmer } from '../i18n.js';
+import { KM_ACTION, T, isKhmer } from '../i18n.js';
 import { decide, requestApproval, revokeOpenApprovals } from './approvals.js';
 import { closePullRequest, jobPayload, mergePayload, runGithubJob, runGithubMerge } from './github.js';
 import { draftPayload, publishPayload, runBookDraft, runBookPublish } from '../books/importer.js';
@@ -149,7 +149,7 @@ async function requestStepApproval(env, task, step, action) {
   await transition(env.DB, 'tasks', task.id, 'awaiting_approval');
   await audit(env, task.id, 'APPROVAL_REQUESTED', 'system', `${action.approvalAction} ${req.id}`);
   const fresh = await getTask(env, task.id);
-  const actionText = isKhmer(env) && action.descriptionKm ? action.descriptionKm : action.description;
+  const actionText = isKhmer(env) ? (KM_ACTION[action.approvalAction] || action.descriptionKm || action.description) : action.description;
   await notify(env, fresh, T.approval(env, task, fresh.proposal, actionText, req.ttlHours),
     { reply_markup: keyboards.approval(req.id, task.id, env) });
 }

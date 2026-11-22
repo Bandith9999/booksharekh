@@ -30,10 +30,11 @@ test('task flow in Khmer: received, approval with Khmer buttons, approved — an
   };
   const km = await run('km');
   const en = await run('en');
-  assert.match(km.received, /^📝 បានទទួល BSK-[a-f0-9-]{13}… — កំពុងរៀបចំផែនការ…$/);
-  assert.match(km.approval.text, /📋 ផែនការ \(mock\/mock\)[\s\S]*👉 ដំណើរការ GitHub demo job[\s\S]*⏳ 24 ម៉ោង · BSK-/);
+  assert.equal(km.received, '📝 កំពុងរៀបចំផែនការ…');
+  assert.match(km.approval.text, /^📋 \[DEMO[^\n]*\n1\. [^\n]+\n\n👉 ដំណើរការ\?$/, 'summary, steps, one-line question');
+  assert.doesNotMatch(km.approval.text, /BSK-|ម៉ោង|mock\/mock|https?:/, 'no IDs, timers, model names or links');
   assert.deepEqual(km.approval.reply_markup.inline_keyboard.flat().map(b => b.text), ['✅ យល់ព្រម', '❌ បដិសេធ', '🛑 បោះបង់']);
-  assert.equal(km.approved, '✅ យល់ព្រមហើយ — កំពុងដំណើរការ…');
+  assert.equal(km.approved, '✅ កំពុងដំណើរការ…');
   assert.equal(latestTask(km.env).status, 'queued', 'same behaviour, only the language differs');
   for (const k of ['received', 'approved']) assert.ok(km[k].length < en[k].length, `${k} is shorter in Khmer`);
   assert.ok(km.approval.text.length < en.approval.text.length, 'approval message is shorter in Khmer');
@@ -70,4 +71,16 @@ test('/website and book request alerts in Khmer', async () => {
   const alert = sent(calls).at(-1);
   assert.equal(alert.text, '📚 សំណើសៀវភៅ #2\nMoby Dick — Herman Melville');
   assert.deepEqual(alert.reply_markup.inline_keyboard[0].map(b => [b.text, b.callback_data]), [['🔎 ស្វែងរក', 'rq:2'], ['🚫 បដិសេធ', 'rr:2']]);
+});
+
+test('Khmer PR review and deploy preview are minimal: no link, commit or IDs; each change once', async () => {
+  const { prReviewText, deployPreviewText } = await import('../src/orchestration/github.js');
+  const env = makeEnv({ BOT_LANGUAGE: 'km', WEBSITE_REPO: 'booksharekh-website' });
+  const patch = ['@@ -1 +1 @@', '- ✨ New Releases', '+ ✨ សៀវភៅថ្មីៗ', '-<li><a href="{{ route(\'x\') }}"><i class="fas fa-fire"></i> New Releases</a></li>', '+<li><a href="{{ route(\'x\') }}"><i class="fas fa-fire"></i> សៀវភៅថ្មីៗ</a></li>'].join('\n');
+  mockFetch([[/\/pulls\/8\/files/, () => Response.json([{ filename: 'resources/views/frontend/newrelease.blade.php', patch }, { filename: 'resources/views/frontend/partials/navbar.blade.php', patch }])],
+    [/\/compare\//, () => Response.json({ files: [{ filename: 'resources/views/frontend/newrelease.blade.php' }, { filename: 'tests/Feature/X.php' }] })]]);
+  const review = await prReviewText(env, 'https://github.com/owner/booksharekh-website/pull/8', '4'.repeat(40), 'Pull request opened.');
+  assert.equal(review, '🔍 PR #8 · 2 ឯកសារ · ✅ tests\n- ✨ New Releases\n+ ✨ សៀវភៅថ្មីៗ\n- New Releases\n+ សៀវភៅថ្មីៗ');
+  const deploy = await deployPreviewText(env, 'c'.repeat(40), '✅ Merged PR #8');
+  assert.equal(deploy, '✅ Merged PR #8\n🚀 1 ឯកសារ\n• newrelease.blade.php');
 });

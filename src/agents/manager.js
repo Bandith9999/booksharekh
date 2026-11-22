@@ -3,7 +3,7 @@ import { clamp } from '../helpers.js';
 import { addArtifact, memoryContext } from '../db.js';
 import { PROMPTS, wrapUntrusted } from './prompts.js';
 import { PLAN_SCHEMA } from './schemas.js';
-import { T, planLanguageRule } from '../i18n.js';
+import { T, isKhmer, planLanguageRule } from '../i18n.js';
 
 const TITLES = {
   book_researcher: 'Book Researcher', book_editor: 'EPUB/PDF Editor', content_creator: 'Content Creator',
@@ -11,6 +11,12 @@ const TITLES = {
 };
 
 export function renderPlan(plan, res, env = null) {
+  // Minimal Khmer: summary and steps only.
+  if (isKhmer(env)) {
+    const lines = [`📋 ${plan.summary}`, ...plan.steps.slice(0, 3).map((s, i) => `${i + 1}. ${s.objective}`)];
+    if (plan.needs_rights_verification) lines.push('⚖️ ត្រូវពិនិត្យសិទ្ធិ');
+    return lines.join('\n');
+  }
   const L = T.plan(env);
   const lines = [L.head(`${res.provider}/${res.model}`), plan.summary, '', L.steps];
   plan.steps.forEach((s, i) => lines.push(`${i + 1}. ${TITLES[s.agent] || s.agent} — ${s.objective}`));

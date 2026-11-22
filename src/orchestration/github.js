@@ -4,7 +4,7 @@ import { audit, latestArtifact, newId } from '../db.js';
 import { notifyTaskOwner } from '../telegram.js';
 import { consumeApproval, consumeStepApproval, finishApproval, releaseApproval } from './approvals.js';
 import { transition } from './state-machine.js';
-import { T } from '../i18n.js';
+import { T, isKhmer } from '../i18n.js';
 
 const HTTP_TIMEOUT_MS = 15000;
 
@@ -124,6 +124,7 @@ export async function mergePayload(env, task) {
 // Telegram review text: changed files and the first changed lines, so the owner can decide without GitHub.
 export async function prReviewText(env, prUrl, headSha, note) {
   const n = prNumberFromUrl(prUrl);
+  if (isKhmer(env)) return prReviewShortKm(env, n);
   const L = T.prReview(env);
   const lines = [L.ready(n, prUrl), `Commit ${headSha.slice(0, 12)} · ${clamp(note, 150)}`];
   try {
@@ -186,6 +187,7 @@ export async function closePullRequest(env, taskId) {
 export async function deployPreviewText(env, sha, header = '') {
   const last = await env.DB.prepare("SELECT value FROM settings WHERE key='last_deployed_sha'").first().catch(() => null);
   const base = last?.value || 'd56611b'; // the cPanel export the repository started from
+  if (isKhmer(env)) return deployPreviewShortKm(env, base, sha, header);
   const lines = header ? [header, ''] : [];
   lines.push(T.deployHead(env, sha.slice(0, 12)));
   try {
@@ -195,4 +197,38 @@ export async function deployPreviewText(env, sha, header = '') {
     if (files) lines.push(T.deployFiles(env, files.length), ...files.slice(0, 12).map(n => `• ${n}`), ...(files.length > 12 ? [`… +${files.length - 12}`] : []));
   } catch { /* preview is best effort; the deploy job computes the exact list */ }
   return clamp(lines.join('\n'), 3000);
+}
+
+// ---- Minimal Khmer previews ----
+const SERVER_FILE = n => !/^(\.github\/|tests\/|website-kit\/|storage\/|vendor\/)|\.md$/.test(n);
+async function prReviewShortKm(env, n) {
+  const lines = [`🔍 PR #${n}`];
+  try {
+    const r = await fetch(`${websiteApi(env)}/pulls/${n}/files?per_page=30`, { headers: githubHeaders(env), signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+    const files = r.ok ? await r.json() : [];
+    lines[0] += ` · ${files.length} ឯកសារ · ✅ tests`;
+    // Changed text only, each distinct line once, HTML/Blade tags removed, short.
+    const seen = new Set();
+    for (const f of files) {
+      for (const l of String(f.patch || '').split('\n')) {
+        if (!/^[+-](?![+-])/.test(l)) continue;
+        const body = l.slice(1).replace(/<[^>]*>|\{\{[^}]*\}\}/g, ' ').replace(/\s+/g, ' ').trim();
+        if (body) seen.add(`${l[0]} ${clamp(body, 60)}`);
+      }
+    }
+    lines.push(...[...seen].slice(0, 6));
+  } catch { /* keep the header only */ }
+  return lines.join('\n');
+}
+async function deployPreviewShortKm(env, base, sha, header) {
+  let files = [];
+  try {
+    const r = await fetch(`${websiteApi(env)}/compare/${base}...${sha}`, { headers: githubHeaders(env), signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+    files = r.ok ? ((await r.json()).files || []).map(x => x.filename).filter(SERVER_FILE) : [];
+  } catch { /* best effort */ }
+  const lines = [];
+  if (header) lines.push(header.split('\n')[0]);
+  lines.push(`🚀 ${files.length} ឯកសារ`, ...files.slice(0, 5).map(p => `• ${p.split('/').pop()}`));
+  if (files.length > 5) lines.push(`… +${files.length - 5}`);
+  return lines.join('\n');
 }
