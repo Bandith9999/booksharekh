@@ -22,7 +22,7 @@ export const T = {
   unknown: env => pick(env, 'Unknown command. Try /help.', 'មិនស្គាល់ command។ សូមវាយ /help'),
   taskReceived: (env, id, type) => pick(env, `📝 Task ${id} received (type ${type}). Planning now; the plan and approval buttons will follow.`, `📝 បានទទួល ${short(id)} — កំពុងរៀបចំផែនការ…`),
   developReceived: (env, id) => pick(env, `📝 Website task ${id} received. Planning now; then you approve running the Laravel Developer, which opens a pull request. Nothing is deployed.`, `📝 បានទទួល ${short(id)} — កំពុងរៀបចំផែនការកែកូដ…`),
-  rateLimited: (env, limit, period) => pick(env, `Limit reached: at most ${limit} tasks per ${period}. Try again later.`, `⛔ ដល់ដែនកំណត់ ${limit} task ក្នុង ${period}។`),
+  rateLimited: (env, limit, period) => pick(env, `Limit reached: at most ${limit} tasks per ${period}. Try again later.`, `⛔ ដល់ដែនកំណត់ ${limit} task ក្នុង${String(period).startsWith('day') ? 'មួយថ្ងៃ' : 'មួយម៉ោង'}។`),
 
   // Approval request (plan or preview + proposed action + buttons)
   approval: (env, task, proposal, actionText, ttl) => pick(env,

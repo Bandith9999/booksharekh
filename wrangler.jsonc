@@ -70,7 +70,7 @@
 		// Also set a monthly limit in the Claude Console (Plans & Billing) as a second guard.
 		"AI_MAX_REQUESTS_PER_MINUTE": "5",
 		"AI_MAX_REQUESTS_PER_DAY": "60",
-		"DAILY_TASK_LIMIT": "20",
+		"DAILY_TASK_LIMIT": "150",
 		"TASK_RATE_LIMIT_PER_HOUR": "10",
 		"TASK_TOKEN_BUDGET": "20000",
 		"DAILY_TOKEN_BUDGET": "100000",
