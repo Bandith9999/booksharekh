@@ -6,9 +6,12 @@ import { parseStructured } from './schema.js';
 
 function managerPlan({ taskType, request }) {
   const video = taskType === 'video_demo';
+  const step = taskType === 'website_code_change'
+    ? { agent: 'laravel_developer', objective: 'Change the website code on a branch and open a pull request for review' }
+    : { agent: video ? 'video_creator' : 'book_researcher', objective: video ? 'Render an 8-second sample-card video in GitHub Actions' : 'Write a short text report in GitHub Actions' };
   return {
     summary: `[DEMO: mock AI provider] ${clamp(request, 200)}`,
-    steps: [{ agent: video ? 'video_creator' : 'book_researcher', objective: video ? 'Render an 8-second sample-card video in GitHub Actions' : 'Write a short text report in GitHub Actions' }],
+    steps: [step],
     risks: ['No book files, website updates or social posts will be performed.'],
     needs_rights_verification: false,
   };

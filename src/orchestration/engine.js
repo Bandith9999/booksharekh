@@ -45,7 +45,7 @@ async function insertStep(env, { taskId, agent, action, status, dependsOn = [], 
 }
 
 // ---------- task lifecycle ----------
-export async function createTask(env, { userId, description }) {
+export async function createTask(env, { userId, description, type: forcedType = null }) {
   const limit = Number(env.TASK_RATE_LIMIT_PER_HOUR) || 20;
   const recent = await env.DB.prepare("SELECT COUNT(*) n FROM tasks WHERE telegram_user_id=? AND created_at > datetime('now','-1 hour')").bind(String(userId)).first();
   if (recent.n >= limit) return { rateLimited: true, limit, period: 'hour' };
@@ -54,7 +54,7 @@ export async function createTask(env, { userId, description }) {
   if (today.n >= dayLimit) return { rateLimited: true, limit: dayLimit, period: 'day (UTC)' };
 
   const id = newId('BSK');
-  const type = classifyTask(description);
+  const type = forcedType || classifyTask(description);
   await env.DB.prepare('INSERT INTO tasks (id,telegram_user_id,request_text,task_type,proposal,status) VALUES (?,?,?,?,?,?)')
     .bind(id, String(userId), clamp(description, 2000), type, '(planning)', 'planning').run();
   const planId = await insertStep(env, { taskId: id, agent: 'manager', action: 'plan', status: 'queued' });
@@ -86,7 +86,7 @@ export async function advance(env, taskId) {
 }
 
 async function payloadFor(env, task, action) {
-  if (action.kind === 'github_job') return jobPayload(env, task);
+  if (action.kind === 'github_job') return jobPayload(env, task, action);
   throw new Error(`No approval payload for action kind ${action.kind}`);
 }
 
@@ -130,7 +130,7 @@ export async function runAgentTask(env, agentTaskId) {
       await audit(env, task.id, 'STEP_COMPLETED', 'worker', `${at.agent}.${at.action} via ${result.provider}/${result.model}`);
       await advance(env, task.id);
     } else if (action.kind === 'github_job') {
-      await runGithubJob(env, task, at);
+      await runGithubJob(env, task, at, action);
     }
     return { ok: true };
   } catch (e) {

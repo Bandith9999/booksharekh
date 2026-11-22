@@ -1,0 +1,155 @@
+# BookShareKH Laravel Developer (AI). Copy into the PRIVATE website repository.
+# Dispatched only by the AI Manager after the owner approves a /develop task in Telegram.
+# Claude Code edits files; this workflow (not the AI) runs checks, scans for secrets, commits to a new
+# branch and opens a pull request. It never deploys and never touches the production server.
+name: Laravel Developer (AI)
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: Approved BookShareKH task ID
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ai-dev-${{ inputs.task_id }}
+  cancel-in-progress: false
+
+jobs:
+  develop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TASK_ID: ${{ inputs.task_id }}
+      WORKER_URL: ${{ secrets.WORKER_URL }}
+      JOB_CALLBACK_SECRET: ${{ secrets.JOB_CALLBACK_SECRET }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Validate task id
+        run: '[[ "$TASK_ID" =~ ^BSK-[a-f0-9-]{36}$ ]] || { echo "invalid task id"; exit 1; }'
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch the approved instruction from the AI Manager
+        id: task
+        run: |
+          curl -fsS --max-time 20 -H "Authorization: Bearer $JOB_CALLBACK_SECRET" "$WORKER_URL/job/$TASK_ID" -o "$RUNNER_TEMP/task.json"
+          python3 - <<'PY'
+          import json, os, uuid
+          t = json.load(open(os.path.join(os.environ['RUNNER_TEMP'], 'task.json')))
+          if t.get('task_type') != 'website_code_change':
+              raise SystemExit('Task is not a website code change')
+          text = t['request_text'][:2000]
+          d = 'EOF_' + uuid.uuid4().hex
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"instruction<<{d}\n{text}\n{d}\n")
+              f.write(f"title<<{d}\n{' '.join(text.split())[:70]}\n{d}\n")
+          PY
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'   # production runs PHP 8.4
+          tools: composer
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Create branch
+        run: git switch -c "ai/$TASK_ID"
+
+      - name: Laravel Developer (Claude Code, Claude subscription)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are the BookShareKH Laravel Developer working in this Laravel (Blade, MySQL) repository.
+            Implement this change requested and approved by the site owner:
+
+            <owner_request>
+            ${{ steps.task.outputs.instruction }}
+            </owner_request>
+
+            Rules:
+            - Make the smallest change that fully does what is asked. Follow the existing code style.
+            - Only edit files. Do not commit, push, create branches or pull requests; the workflow does that.
+            - Never create or edit .env files, never add credentials, keys or tokens, never weaken authentication or authorization.
+            - Do not add destructive migrations (dropping tables or columns, deleting data). If one seems needed, stop and explain why instead.
+            - Run `php -l` on PHP files you change, and `php artisan test` if a tests/ directory exists.
+            - Finish with a short summary of what you changed and why, and anything the owner must check by hand.
+          claude_args: >-
+            --max-turns 40
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(php -l:*),Bash(php artisan test:*),Bash(php artisan route:list:*),Bash(composer dump-autoload:*)"
+
+      - name: Checks (lint, tests, secret scan)
+        id: checks
+        run: |
+          set +e
+          # Stage first so new files are linted too; the test .env is created afterwards and never staged.
+          git add -A
+          git diff --cached --name-only --diff-filter=AM | grep -E '\.php$' | while read -r f; do php -l "$f"; done > "$RUNNER_TEMP/lint.txt" 2>&1
+          grep -q "Errors parsing" "$RUNNER_TEMP/lint.txt"; LINT=$([ $? -eq 0 ] && echo fail || echo pass)
+          if [ -d tests ]; then
+            cp -n .env.example .env 2>/dev/null; php artisan key:generate --force >/dev/null 2>&1
+            php artisan test > "$RUNNER_TEMP/tests.txt" 2>&1; TESTS=$([ $? -eq 0 ] && echo pass || echo fail)
+          else TESTS=none; fi
+          git reset -q -- .env 2>/dev/null
+          if git diff --cached | grep -nE '^\+.*(APP_KEY=base64:|DB_PASSWORD=.+|sk-ant-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|ghp_[A-Za-z0-9]{20,}|github_pat_|-----BEGIN [A-Z ]*PRIVATE KEY)'; then
+            SECRETS=fail; else SECRETS=pass; fi
+          echo "lint=$LINT" >> "$GITHUB_OUTPUT"; echo "tests=$TESTS" >> "$GITHUB_OUTPUT"; echo "secrets=$SECRETS" >> "$GITHUB_OUTPUT"
+          git diff --cached --quiet && echo "changed=no" >> "$GITHUB_OUTPUT" || echo "changed=yes" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and open pull request
+        id: pr
+        if: steps.checks.outputs.changed == 'yes' && steps.checks.outputs.secrets == 'pass'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ steps.task.outputs.title }}
+          LINT: ${{ steps.checks.outputs.lint }}
+          TESTS: ${{ steps.checks.outputs.tests }}
+        run: |
+          git config user.name "BookShareKH AI Developer"
+          git config user.email "ai-developer@users.noreply.github.com"
+          git commit -q -m "AI ($TASK_ID): $TITLE"
+          git push -q -u origin "ai/$TASK_ID"
+          {
+            echo "Automated change for task \`$TASK_ID\`, requested and approved in Telegram."
+            echo; echo "- PHP lint: $LINT"; echo "- Tests: $TESTS"; echo "- Secret scan: pass"
+            echo; echo "Run: $RUN_URL"
+            echo; echo "**Not deployed.** Deployment needs a separate Telegram approval for this exact commit."
+          } > "$RUNNER_TEMP/body.md"
+          DRAFT=""; [ "$LINT" = fail ] || [ "$TESTS" = fail ] && DRAFT="--draft"
+          url=$(gh pr create $DRAFT --base main --head "ai/$TASK_ID" --title "AI: $TITLE" --body-file "$RUNNER_TEMP/body.md")
+          echo "url=$url" >> "$GITHUB_OUTPUT"; echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Report to the AI Manager
+        if: always()
+        env:
+          PR_URL: ${{ steps.pr.outputs.url }}
+          HEAD_SHA: ${{ steps.pr.outputs.sha }}
+          CHANGED: ${{ steps.checks.outputs.changed }}
+          LINT: ${{ steps.checks.outputs.lint }}
+          TESTS: ${{ steps.checks.outputs.tests }}
+          SECRETS: ${{ steps.checks.outputs.secrets }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          e = os.environ
+          ok = bool(e.get('PR_URL')) and e.get('LINT') != 'fail' and e.get('TESTS') != 'fail'
+          if e.get('SECRETS') == 'fail': note = 'Stopped: the change contained secret-like content, so nothing was pushed.'
+          elif e.get('CHANGED') == 'no': note = 'The developer made no file changes.'
+          elif not e.get('PR_URL'): note = 'The job failed before a pull request was created; see the run log.'
+          else: note = f"Pull request opened. PHP lint: {e.get('LINT')}, tests: {e.get('TESTS')}."
+          body = {'task_id': e['TASK_ID'], 'status': 'completed' if ok else 'failed', 'run_url': e['RUN_URL'], 'note': note}
+          if e.get('PR_URL'): body['pr_url'] = e['PR_URL']
+          if e.get('HEAD_SHA'): body['head_sha'] = e['HEAD_SHA']
+          req = urllib.request.Request(e['WORKER_URL'].rstrip('/') + '/job-result', data=json.dumps(body).encode(),
+              headers={'Authorization': 'Bearer ' + e['JOB_CALLBACK_SECRET'], 'Content-Type': 'application/json'})
+          urllib.request.urlopen(req, timeout=25)
+          PY

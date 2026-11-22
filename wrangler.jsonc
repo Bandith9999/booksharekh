@@ -34,6 +34,13 @@
 		"GITHUB_OWNER": "Bandith9999",
 		"GITHUB_REPO": "booksharekh",
 
+		// Website management. WEBSITE_REPO = the PRIVATE Laravel repository name (empty until it exists).
+		// LARAVEL_API_URL = base URL of the restricted AI API (empty until installed); its token is the
+		// secret LARAVEL_API_TOKEN.
+		"WEBSITE_URL": "https://booksharekh.com",
+		"WEBSITE_REPO": "",
+		"LARAVEL_API_URL": "",
+
 		// $0 mode: every agent uses the default tier, Gemini on Google's free API tier.
 		// The other tiers (AI_FAST_*, AI_REVIEW_*, AI_CODE_*) are unset, so they inherit the default.
 		// Override one agent from Telegram with /agent <name> set provider=google model=<free model>.

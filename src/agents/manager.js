@@ -10,7 +10,7 @@ const TITLES = {
 };
 
 export function renderPlan(plan, res) {
-  const lines = [`Plan by ${res.provider}/${res.model}:`, plan.summary, '', 'Proposed steps (only the demo job below can run today):'];
+  const lines = [`Plan by ${res.provider}/${res.model}:`, plan.summary, '', 'Proposed steps (only the job named under "Proposed action" runs after approval):'];
   plan.steps.forEach((s, i) => lines.push(`${i + 1}. ${TITLES[s.agent] || s.agent} — ${s.objective}`));
   if (plan.risks.length) { lines.push('', 'Risks / approvals:'); plan.risks.forEach(r => lines.push(`• ${r}`)); }
   lines.push('', `Rights verification needed: ${plan.needs_rights_verification ? 'yes' : 'no'}`);

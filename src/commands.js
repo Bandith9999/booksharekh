@@ -7,10 +7,15 @@ import { fallbackRoute, freeModels, paidEnabled, resolveRoute, validateRoute } f
 import { PROVIDER_NAMES, getProvider, normalizeProvider } from './ai/provider-factory.js';
 import { approveStep, cancelTask, createTask, legacyDecision, rejectStep, resumeTask } from './orchestration/engine.js';
 import { budgets, tokensUsed } from './orchestration/budget.js';
-import { WORKFLOW_FILE, githubHeaders, workflowUrl } from './orchestration/github.js';
+import { WORKFLOWS, WORKFLOW_FILE, githubHeaders, workflowUrl } from './orchestration/github.js';
+import { checkWebsite, formatHealth } from './website/health.js';
+import { WebsiteApiError, apiConfigured, apiHealth, formatBooks, latestBooks, searchBooks } from './website/laravel-api.js';
 
 const HELP = `BookShareKH Manager
 /task <request> — plan a task (approval needed before anything runs)
+/develop <change> — website code change: the Laravel Developer opens a pull request (approval first; never deploys)
+/website — live site health and security check
+/books [latest N | search <title>] — books from the website API
 /taskstatus <task-id> — steps, approvals, tokens, GitHub run
 /approve <task-id> · /reject <task-id> — decide a waiting task
 /cancel <task-id> — cancel a task that has not started on GitHub
@@ -150,6 +155,13 @@ export async function diagnostics(env) {
         : `❌ GitHub HTTP ${r.status}\n   → ${githubHint(r.status)}`);
     } catch (e) { lines.push(`❌ GitHub: ${clamp(e.message, 120)}`); }
   } else lines.push('❌ GitHub settings incomplete (GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO)');
+  if (env.WEBSITE_REPO && env.GITHUB_TOKEN) {
+    try {
+      const r = await fetch(workflowUrl(env, WORKFLOWS.website_dev), { headers: githubHeaders(env), signal: AbortSignal.timeout(15000) });
+      lines.push(r.ok ? `✅ Website repo ${env.WEBSITE_REPO}: ${WORKFLOWS.website_dev.file} readable` : `❌ Website repo ${env.WEBSITE_REPO}: HTTP ${r.status}\n   → ${githubHint(r.status)}`);
+    } catch (e) { lines.push(`❌ Website repo: ${clamp(e.message, 120)}`); }
+  } else lines.push('▫️ Website repo not connected (WEBSITE_REPO unset)');
+  lines.push(apiConfigured(env) ? '✅ Laravel API configured (check with /website)' : '▫️ Laravel API not configured');
   return lines.join('\n');
 }
 
@@ -234,6 +246,38 @@ export async function handleMessage(env, m) {
       if (!task) return;
       const r = await resumeTask(env, task.id, user);
       return reply(env, chat, r.ok ? `Resumed ${task.id}. If the quota is still used up it will pause again; nothing switches to paid AI.` : r.reason === 'not_found' ? 'Task not found.' : `Cannot resume: task is ${r.reason.replace('status ', '')}.`);
+    }
+    case 'develop': {
+      if (!c.args) return reply(env, chat, 'Use: /develop Change the homepage heading to "Welcome to BookShareKH"');
+      if (!env.WEBSITE_REPO) return reply(env, chat, 'The website repository is not connected yet (WEBSITE_REPO is not set). See README section K.');
+      const r = await createTask(env, { userId: user, description: c.args, type: 'website_code_change' });
+      if (r.rateLimited) return reply(env, chat, `Limit reached: at most ${r.limit} tasks per ${r.period}. Try again later.`);
+      if (r.failed) return;
+      return reply(env, chat, `📝 Website task ${r.id} received. Planning now; then you approve running the Laravel Developer, which opens a pull request. Nothing is deployed.`);
+    }
+    case 'website': {
+      await audit(env, null, 'WEBSITE_CHECK', user, c.args || 'status');
+      const lines = [formatHealth(await checkWebsite(env))];
+      if (apiConfigured(env)) {
+        try { const h = await apiHealth(env); lines.push(`✅ Laravel API: ${clamp(h.app || 'ok', 40)} · Laravel ${clamp(h.laravel || '?', 20)} · PHP ${clamp(h.php || '?', 20)}`); }
+        catch (e) { lines.push(`❌ Laravel API: ${e.message}`); }
+      } else lines.push('▫️ Laravel API not connected yet (needs the website repository first).');
+      return reply(env, chat, lines.join('\n'));
+    }
+    case 'books': {
+      const [sub, ...rest] = c.args.split(/\s+/).filter(Boolean);
+      try {
+        if (sub === 'search') {
+          const q = rest.join(' ');
+          if (!q) return reply(env, chat, 'Use: /books search <title>');
+          return reply(env, chat, formatBooks(await searchBooks(env, q), `Books matching "${clamp(q, 60)}":`));
+        }
+        const n = Number(rest[0] || (sub && sub !== 'latest' ? sub : 5)) || 5;
+        return reply(env, chat, formatBooks(await latestBooks(env, n), `Latest ${n} books:`));
+      } catch (e) {
+        if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
+        throw e;
+      }
     }
     case 'agents': return reply(env, chat, await agentsText(env));
     case 'agent': {

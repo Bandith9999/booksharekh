@@ -14,7 +14,7 @@ export const TOOLS = {
   epub_validate: { description: 'Run EPUBCheck / ebooklib checks in GitHub Actions', implemented: false, phase: 5 },
   pdf_inspect: { description: 'Inspect PDF structure with pypdf / PyMuPDF', implemented: false, phase: 5 },
   ffmpeg_render: { description: 'Render vertical video with FFmpeg in GitHub Actions', implemented: false, phase: 5 },
-  github_pull_request: { description: 'Open a pull request on the Laravel repository', implemented: false, phase: 6 },
+  github_pull_request: { description: 'Run the Laravel Developer job on the private website repo: branch, edit, test, open a pull request', implemented: true },
 };
 
 // Demo GitHub job, approved per task. The Phase 1 workflow runs it.
@@ -27,6 +27,7 @@ const demoJob = (label) => ({
 export const DEMO_JOB_STEP = {
   video_demo: { agent: 'video_creator', action: 'demo_video_job' },
   report: { agent: 'book_researcher', action: 'demo_report_job' },
+  website_code_change: { agent: 'laravel_developer', action: 'code_change_job' },
 };
 
 const LIST = [
@@ -71,7 +72,13 @@ const LIST = [
     description: 'Prepares Laravel changes, migrations and tests as pull requests.',
     allowedTools: ['github_pull_request'],
     limitations: ['Never deploys or touches the production database.', 'Human review required.'],
-    maxAttempts: 2, allowFallback: false, maxOutputTokens: 8000, outputSchema: null, actions: {},
+    maxAttempts: 2, allowFallback: false, maxOutputTokens: 8000, outputSchema: null,
+    // Code is edited by Claude Code inside GitHub Actions on the private website repo (Claude subscription),
+    // never sent to the Worker's free-tier model. The job opens a pull request; it never deploys.
+    actions: { code_change_job: {
+      kind: 'github_job', tool: 'github_pull_request', workflow: 'website_dev', requiresApproval: true, approvalAction: 'dispatch_code_change',
+      description: 'Run the Laravel Developer on the private website repo: new branch, code change, tests, pull request. Nothing is deployed.',
+    } },
   },
   {
     name: 'qa_reviewer', title: 'QA Reviewer', tier: 'review', phase: 3,

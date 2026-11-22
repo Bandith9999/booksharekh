@@ -43,19 +43,28 @@ async function finishJob(request, env) {
   const url = String(data.run_url || '');
   if (url && !/^https:\/\/github\.com\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+\/actions\/runs\/\d+$/.test(url)) return json({ error: 'bad URL' }, 400);
   const note = clamp(data.note, 500);
+  // Laravel Developer jobs also report the pull request and its head commit.
+  const prUrl = data.pr_url ? String(data.pr_url) : '';
+  if (prUrl && !/^https:\/\/github\.com\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+\/pull\/\d+$/.test(prUrl)) return json({ error: 'bad PR URL' }, 400);
+  const headSha = data.head_sha ? String(data.head_sha) : '';
+  if (headSha && !/^[0-9a-f]{40}$/.test(headSha)) return json({ error: 'bad commit SHA' }, 400);
   const row = await env.DB.prepare(`UPDATE tasks SET status=?,result_url=?,result_note=?,updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND status IN ('queued','dispatching','running') RETURNING telegram_user_id`)
+      WHERE id=? AND status IN ('queued','dispatching','running') RETURNING telegram_user_id, task_type`)
     .bind(state, url, note, data.task_id).first();
   if (!row) return json({ error: 'unknown or already completed task' }, 409);
   // Phase 2 bookkeeping; these match nothing for tasks created before Phase 2.
   await env.DB.prepare(`UPDATE agent_tasks SET status=?, output=?, error=?, finished_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
-      WHERE task_id=? AND action LIKE 'demo_%_job' AND status='running'`)
-    .bind(state, JSON.stringify({ run_url: url, note }), state === 'failed' ? note : null, data.task_id).run();
+      WHERE task_id=? AND action LIKE '%_job' AND status='running'`)
+    .bind(state, JSON.stringify({ run_url: url, note, pr_url: prUrl || undefined, head_sha: headSha || undefined }), state === 'failed' ? note : null, data.task_id).run();
   await env.DB.prepare("UPDATE workflow_runs SET status=?, run_url=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=? AND status IN ('dispatched','unknown')")
     .bind(state, url || null, data.task_id).run();
   if (url) await addArtifact(env, { taskId: data.task_id, kind: 'github_run', uri: url, contentType: 'text/uri-list' });
+  if (prUrl) await addArtifact(env, { taskId: data.task_id, kind: 'pull_request', uri: prUrl, content: JSON.stringify({ pr_url: prUrl, head_sha: headSha || null }) });
   await audit(env, data.task_id, 'JOB_' + state.toUpperCase(), 'github-actions', clamp(data.note, 250));
-  await reply(env, Number(row.telegram_user_id), `Task ${data.task_id}: ${state}\n${clamp(data.note, 300)}\n${url}\n\nDemo job only. No public post or Laravel upload performed.`);
+  const tail = row.task_type === 'website_code_change'
+    ? (prUrl ? `\n\nPull request for review: ${prUrl}${headSha ? `\nCommit ${headSha.slice(0, 12)}` : ''}\nNothing has been deployed. Deployment is a separate approval for this exact commit.` : '\n\nNo pull request was created.')
+    : '\n\nDemo job only. No public post or Laravel upload performed.';
+  await reply(env, Number(row.telegram_user_id), `Task ${data.task_id}: ${state}\n${clamp(data.note, 300)}\n${url}${tail}`);
   return json({ ok: true });
 }
 

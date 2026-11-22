@@ -251,3 +251,10 @@ Send `/diag` to the bot. It reports whether each secret is set (never its value)
 - Tasks are durable in D1 but there is no scheduled recovery for a lost callback or interrupted GitHub runner. Build a reconciler and retry controls before production use.
 - For privacy/copyright, only process titles/covers/files with rights to use and publish; do not remove third-party rights notices or watermarks.
 - Keep the real BookShareKH.com application on Namecheap Stellar Plus.
+
+## K. Website management (in progress)
+
+- `/website` checks the live site: homepage, debug mode and exposed sensitive paths. It reports status codes only and never page contents.
+- `/books [latest N | search <title>]` reads book data through the restricted Laravel AI API, once that API is installed (`LARAVEL_API_URL` + secret `LARAVEL_API_TOKEN`).
+- `/develop <change>` makes the Manager plan the change and ask for your approval. Approving dispatches the **Laravel Developer** workflow in the private website repository: Claude Code edits the code on a new branch, then the workflow runs lint, tests and a secret scan and opens a pull request. Telegram gets the PR link and commit. **Nothing is deployed**; deployment will be a separate approval for that exact commit.
+- Setup of the website repository: see [website-kit/README.md](website-kit/README.md).
