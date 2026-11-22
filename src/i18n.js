@@ -4,6 +4,15 @@
 
 export const isKhmer = env => env?.BOT_LANGUAGE === 'km';
 const pick = (env, en, km) => (isKhmer(env) ? km : en);
+
+// First line of every alert, so the kind is clear at a glance (owner request).
+const NOTES = {
+  topup: ['TOP-UP', 'បញ្ចូលប្រាក់'],
+  member: ['NEW MEMBER', 'សមាជិកថ្មី'],
+  login: ['LOGIN', 'Login'],
+  request: ['BOOK REQUEST', 'សំណើសៀវភៅ'],
+};
+export const note = (env, kind) => `*** ${pick(env, ...NOTES[kind])} ***`;
 const short = id => `${String(id).slice(0, 17)}…`;
 
 export const T = {
@@ -66,7 +75,7 @@ export const T = {
     { head: who => `📋 ផែនការ (${who}):`, steps: 'ជំហាន:', risks: '⚠️ ហានិភ័យ:', rights: v => (v ? '⚖️ ត្រូវពិនិត្យសិទ្ធិអ្នកនិពន្ធ' : '') }),
 
   // Books
-  requestAlert: (env, r) => pick(env, `📚 New book request #${r.id}\n${r.book_title}${r.author ? ` — ${r.author}` : ''}${r.language ? ` (${r.language})` : ''}`, `📚 សំណើសៀវភៅ #${r.id}\n${r.book_title}${r.author ? ` — ${r.author}` : ''}`),
+  requestAlert: (env, r) => `${note(env, 'request')}\n` + pick(env, `📚 #${r.id} ${r.book_title}${r.author ? ` — ${r.author}` : ''}${r.language ? ` (${r.language})` : ''}`, `📚 #${r.id} ${r.book_title}${r.author ? ` — ${r.author}` : ''}`),
   requestButtons: env => pick(env, { find: '🔎 Find a legal copy', reject: '🚫 Reject request' }, { find: '🔎 ស្វែងរក', reject: '🚫 បដិសេធ' }),
   watching: (env, cursor) => pick(env, `👀 Watching booksharekh.com book requests from #${cursor} onward. New requests will appear here.`, `👀 កំពុងតាមដានសំណើសៀវភៅ (ចាប់ពី #${cursor})។`),
   candidates: env => pick(env,
@@ -97,7 +106,7 @@ ${url}` : ''}`),
 
   // Top-ups (money): show exactly what will be credited.
   topupAlert: (env, t) => {
-    const lines = [`💰 Top-up #${t.id}`, `👤 ${t.user || '?'}`, `💵 ${t.amount} ${t.currency} · ${String(t.method || '').toUpperCase()}`,
+    const lines = [note(env, 'topup'), `💰 Top-up #${t.id}`, `👤 ${t.user || '?'}`, `💵 ${t.amount} ${t.currency} · ${String(t.method || '').toUpperCase()}`,
       t.transaction_id ? `🧾 ${t.transaction_id}` : '', t.notes ? `📝 ${t.notes}` : '', t.has_image ? '' : pick(env, '⚠️ No receipt image', '⚠️ គ្មានរូបវិក្កយបត្រ')];
     return [...lines.filter(Boolean), '', pick(env, '👉 Approve and credit this balance?', '👉 បញ្ចូលលុយ?')].join('\n');
   },
@@ -109,10 +118,10 @@ ${url}` : ''}`),
   topupUnknown: env => pick(env, 'This top-up is no longer in my list. Send /topups to see pending ones.', 'រកមិនឃើញ។ សូមវាយ /topups'),
   // Users: one short message per check, only when something happened.
   userActivity: (env, reg, logins, total) => [
-    reg ? pick(env, `🆕 New users: ${reg}`, `🆕 ចុះឈ្មោះថ្មី: ${reg}`) : '',
-    logins ? `🔑 Login: ${logins}` : '',
+    reg ? `${note(env, 'member')}\n🆕 ${reg}` : '',
+    logins ? `${note(env, 'login')}\n🔑 ${logins}` : '',
     pick(env, `👥 Total users: ${total}`, `👥 សរុប ${total} នាក់`),
-  ].filter(Boolean).join('\n'),
+  ].filter(Boolean).join('\n\n'),
   usersSummary: (env, total, reg, logins) => pick(env, `👥 Total users: ${total}\n🆕 New (24h): ${reg}\n🔑 Logged in (24h): ${logins}`,
     `👥 សរុប ${total} នាក់\n🆕 ថ្មី (24h): ${reg}\n🔑 Login (24h): ${logins}`),
   noTopups: env => pick(env, 'No pending top-ups.', 'គ្មាន topup រង់ចាំ'),

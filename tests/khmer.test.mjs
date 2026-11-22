@@ -69,7 +69,7 @@ test('/website and book request alerts in Khmer', async () => {
   requests.push({ id: 2, book_title: 'Moby Dick', author: 'Herman Melville', status: 'pending' });
   await worker.scheduled({}, env, {});
   const alert = sent(calls).at(-1);
-  assert.equal(alert.text, '📚 សំណើសៀវភៅ #2\nMoby Dick — Herman Melville');
+  assert.equal(alert.text, '*** សំណើសៀវភៅ ***\n📚 #2 Moby Dick — Herman Melville');
   assert.deepEqual(alert.reply_markup.inline_keyboard[0].map(b => [b.text, b.callback_data]), [['🔎 ស្វែងរក', 'rq:2'], ['🚫 បដិសេធ', 'rr:2']]);
 });
 

@@ -39,7 +39,7 @@ test('first check is silent; then one short message with new users, logins and t
   s.state.total = 1234;
   await worker.scheduled({}, e, {});
   assert.equal(s.state.asked[1].since, '2026-11-22 10:00:01', 'continues from the site time it returned');
-  assert.equal(lastText(calls), '🆕 ចុះឈ្មោះថ្មី: dara (Cambodia · Google)\n🔑 Login: sok, vanna\n👥 សរុប 1,234 នាក់');
+  assert.equal(lastText(calls), '*** សមាជិកថ្មី ***\n🆕 dara (Cambodia · Google)\n\n*** Login ***\n🔑 sok, vanna\n\n👥 សរុប 1,234 នាក់');
 
   const before = sent(calls).length;
   await worker.scheduled({}, e, {});
@@ -53,7 +53,7 @@ test('many logins are capped to 10 names', async () => {
   await worker.scheduled({}, e, {});
   s.state.activity = { registered: [], logins: Array.from({ length: 13 }, (_, i) => ({ user: `u${i}` })) };
   await worker.scheduled({}, e, {});
-  assert.equal(lastText(calls), '🔑 Login: u0, u1, u2, u3, u4, u5, u6, u7, u8, u9, +3\n👥 Total users: 1,200');
+  assert.equal(lastText(calls), '*** LOGIN ***\n🔑 u0, u1, u2, u3, u4, u5, u6, u7, u8, u9, +3\n\n👥 Total users: 1,200');
 });
 
 test('/users shows the total and the last 24 hours', async () => {
