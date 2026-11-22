@@ -14,6 +14,7 @@ import { WORKFLOWS, WORKFLOW_FILE, deployPreviewText, githubHeaders, workflowUrl
 import { checkWebsite, formatHealth } from './website/health.js';
 import { WebsiteApiError, apiConfigured, apiHealth, formatBooks, latestBooks, searchBooks } from './website/laravel-api.js';
 import { decideTopup, pendingTopups, sendTopupAlert } from './website/topups.js';
+import { usersSummary } from './website/users.js';
 
 const HELP = `BookShareKH Manager
 /task <request> — plan a task (approval needed before anything runs)
@@ -305,6 +306,12 @@ export async function handleMessage(env, m) {
         const n = Number(rest[0] || (sub && sub !== 'latest' ? sub : 5)) || 5;
         return reply(env, chat, formatBooks(await latestBooks(env, n), T.booksHeading(env, n), T.noBooks(env)));
       } catch (e) {
+        if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
+        throw e;
+      }
+    }
+    case 'users': {
+      try { return reply(env, chat, await usersSummary(env)); } catch (e) {
         if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
         throw e;
       }

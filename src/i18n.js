@@ -13,6 +13,7 @@ export const T = {
 /research <ចំណងជើង> — រកសៀវភៅ public domain
 /requests — សំណើសៀវភៅដែលកំពុងរង់ចាំ
 /topups — topup ដែលកំពុងរង់ចាំ
+/users — ចំនួនអ្នកប្រើ
 /books [latest N | search <ចំណងជើង>] — សៀវភៅលើវេបសាយ
 /website — ពិនិត្យវេបសាយ
 /deploy — ដាក់កូដដែលបាន merge ឲ្យដំណើរការលើវេបសាយ
@@ -106,6 +107,14 @@ ${url}` : ''}`),
   topupRejected: (env, id) => pick(env, `❌ Top-up #${id} rejected. No balance added.`, `❌ Topup #${id} បានបដិសេធ`),
   topupProblem: (env, id, msg) => pick(env, `⚠️ Top-up #${id}: ${msg}`, `⚠️ Topup #${id}: ${msg}`),
   topupUnknown: env => pick(env, 'This top-up is no longer in my list. Send /topups to see pending ones.', 'រកមិនឃើញ។ សូមវាយ /topups'),
+  // Users: one short message per check, only when something happened.
+  userActivity: (env, reg, logins, total) => [
+    reg ? pick(env, `🆕 New users: ${reg}`, `🆕 ចុះឈ្មោះថ្មី: ${reg}`) : '',
+    logins ? `🔑 Login: ${logins}` : '',
+    pick(env, `👥 Total users: ${total}`, `👥 សរុប ${total} នាក់`),
+  ].filter(Boolean).join('\n'),
+  usersSummary: (env, total, reg, logins) => pick(env, `👥 Total users: ${total}\n🆕 New (24h): ${reg}\n🔑 Logged in (24h): ${logins}`,
+    `👥 សរុប ${total} នាក់\n🆕 ថ្មី (24h): ${reg}\n🔑 Login (24h): ${logins}`),
   noTopups: env => pick(env, 'No pending top-ups.', 'គ្មាន topup រង់ចាំ'),
   booksHeading: (env, n) => pick(env, `Latest ${n} books:`, `សៀវភៅថ្មីៗ ${n}:`),
   searchHeading: (env, q) => pick(env, `Books matching "${q}":`, `លទ្ធផល "${q}":`),
