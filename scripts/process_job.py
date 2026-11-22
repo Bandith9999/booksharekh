@@ -32,7 +32,8 @@ def ass_text(s):
 
 def api(path, payload=None):
     data=json.dumps(payload).encode() if payload is not None else None
-    req=urllib.request.Request(root+path,data=data,headers={'Authorization':'Bearer '+secret, 'Content-Type':'application/json'})
+    # Cloudflare blocks the default "Python-urllib" user agent (error 1010), so always send our own.
+    req=urllib.request.Request(root+path,data=data,headers={'Authorization':'Bearer '+secret, 'Content-Type':'application/json','User-Agent':'BookShareKH-GitHub-Runner/1.0'})
     with urllib.request.urlopen(req,timeout=25) as res:
         return json.loads(res.read())
 

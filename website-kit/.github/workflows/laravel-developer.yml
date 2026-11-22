@@ -150,6 +150,7 @@ jobs:
           if e.get('PR_URL'): body['pr_url'] = e['PR_URL']
           if e.get('HEAD_SHA'): body['head_sha'] = e['HEAD_SHA']
           req = urllib.request.Request(e['WORKER_URL'].rstrip('/') + '/job-result', data=json.dumps(body).encode(),
-              headers={'Authorization': 'Bearer ' + e['JOB_CALLBACK_SECRET'], 'Content-Type': 'application/json'})
+              headers={'Authorization': 'Bearer ' + e['JOB_CALLBACK_SECRET'], 'Content-Type': 'application/json',
+                       'User-Agent': 'BookShareKH-GitHub-Runner/1.0'})  # Cloudflare blocks Python-urllib (error 1010)
           urllib.request.urlopen(req, timeout=25)
           PY
