@@ -17,6 +17,7 @@ export const TOOLS = {
   epub_validate: { description: 'Run EPUBCheck / ebooklib checks in GitHub Actions', implemented: false, phase: 5 },
   pdf_inspect: { description: 'Inspect PDF structure with pypdf / PyMuPDF', implemented: false, phase: 5 },
   ffmpeg_render: { description: 'Render vertical video with FFmpeg in GitHub Actions', implemented: false, phase: 5 },
+  website_deploy: { description: 'Deploy an approved commit to booksharekh.com over SSH (changed files, backup, health check, rollback)', implemented: true },
   github_pull_request: { description: 'Run the Laravel Developer job on the private website repo: branch, edit, test, open a pull request', implemented: true },
 };
 
@@ -83,7 +84,7 @@ const LIST = [
   {
     name: 'laravel_developer', title: 'Laravel Developer', tier: 'code', phase: 6, confidential: true,
     description: 'Prepares Laravel changes, migrations and tests as pull requests.',
-    allowedTools: ['github_pull_request'],
+    allowedTools: ['github_pull_request', 'website_deploy'],
     limitations: ['Never deploys or touches the production database.', 'Human review required.'],
     maxAttempts: 2, allowFallback: false, maxOutputTokens: 8000, outputSchema: null,
     // Code is edited by Claude Code inside GitHub Actions on the private website repo (Claude subscription),
@@ -94,6 +95,12 @@ const LIST = [
         description: 'Run the Laravel Developer on the private website repo: new branch, code change, tests, pull request. Nothing is deployed.', descriptionKm: 'ឲ្យ Laravel Developer កែកូដ និងបង្កើត PR។ មិនទាន់ deploy ទេ។',
       },
       // Owner approves merging the exact reviewed commit into main (GitHub refuses if the PR changed).
+      // Owner approves deploying exactly this commit to the live site (after merge, or via /deploy).
+      deploy_job: {
+        kind: 'github_job', tool: 'website_deploy', workflow: 'website_deploy', requiresApproval: true, approvalAction: 'deploy_website',
+        description: 'Deploy this commit to booksharekh.com: backup first, upload changed files only, check the site, roll back automatically if it breaks.',
+        descriptionKm: 'Deploy commit នេះទៅ booksharekh.com (backup មុន · upload តែឯកសារដែលបានកែ · ពិនិត្យ · rollback ស្វ័យប្រវត្តិ)។',
+      },
       merge_pr: {
         kind: 'github_merge', tool: 'github_pull_request', requiresApproval: true, approvalAction: 'merge_pull_request',
         description: 'Merge this pull request into main on the website repo. The live site does not change until it is deployed.', descriptionKm: 'Merge PR នេះចូល main។ វេបសាយផ្ទាល់មិនទាន់ប្តូរទេ។',

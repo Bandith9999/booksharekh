@@ -5,7 +5,7 @@ import { addArtifact, audit } from './db.js';
 import { reply } from './telegram.js';
 import { T } from './i18n.js';
 import { advance } from './orchestration/engine.js';
-import { prReviewText } from './orchestration/github.js';
+import { deployShaOf, prReviewText } from './orchestration/github.js';
 import { handleCallback, handleMessage } from './commands.js';
 import { handleQueueBatch } from './orchestration/queue-consumer.js';
 import { pollBookRequests } from './books/requests.js';
@@ -38,7 +38,9 @@ async function getJob(env, id) {
   const job = await env.DB.prepare('SELECT id,request_text,task_type,status FROM tasks WHERE id=?').bind(id).first();
   if (!job) return json({ error: 'not found' }, 404);
   if (!['queued', 'dispatching', 'running'].includes(job.status)) return json({ error: 'not queued' }, 409);
-  return json(job);
+  // Deploy jobs verify they were dispatched for the approved commit.
+  const deploy = await env.DB.prepare("SELECT input FROM agent_tasks WHERE task_id=? AND action='deploy_job' AND status='running'").bind(id).first();
+  return json(deploy ? { ...job, deploy_sha: deployShaOf(deploy) } : job);
 }
 async function finishJob(request, env) {
   const data = await request.json().catch(() => null);
@@ -55,6 +57,8 @@ async function finishJob(request, env) {
   // A website change that opened a PR is not finished: it continues to the owner's merge approval.
   const current = await env.DB.prepare('SELECT task_type FROM tasks WHERE id=?').bind(data.task_id).first();
   const toMerge = current?.task_type === 'website_code_change' && state === 'completed' && prUrl && headSha;
+  const deploying = await env.DB.prepare("SELECT id FROM agent_tasks WHERE task_id=? AND action='deploy_job' AND status='running'").bind(data.task_id).first();
+  const deployedSha = /^[0-9a-f]{40}$/.test(String(data.deployed_sha || '')) ? String(data.deployed_sha) : '';
   const row = await env.DB.prepare(`UPDATE tasks SET status=?,result_url=?,result_note=?,updated_at=CURRENT_TIMESTAMP
       WHERE id=? AND status IN ('queued','dispatching','running') RETURNING telegram_user_id, task_type`)
     .bind(toMerge ? 'running' : state, url, note, data.task_id).first();
@@ -72,6 +76,14 @@ async function finishJob(request, env) {
   if (toMerge) {
     await env.DB.prepare('UPDATE tasks SET proposal=?, updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(clamp(await prReviewText(env, prUrl, headSha, note), 3000), data.task_id).run();
     await advance(env, data.task_id); // sends the diff with Approve (merge) / Reject (close PR)
+    return json({ ok: true });
+  }
+  if (deploying) {
+    if (state === 'completed' && deployedSha) {
+      await env.DB.prepare(`INSERT INTO settings (key,value,updated_at) VALUES ('last_deployed_sha',?,CURRENT_TIMESTAMP)
+          ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`).bind(deployedSha).run();
+    }
+    await reply(env, Number(row.telegram_user_id), T.deployDone(env, state === 'completed', clamp(data.note, 300), url));
     return json({ ok: true });
   }
   await reply(env, Number(row.telegram_user_id), T.jobDone(env, data.task_id, state, clamp(data.note, 300), url, row.task_type !== 'website_code_change', prUrl));

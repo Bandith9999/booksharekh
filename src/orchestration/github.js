@@ -14,7 +14,12 @@ export const WORKFLOWS = {
   demo: { file: 'worker-job.yml', repo: env => env.GITHUB_REPO, label: 'demo job', repoSetting: 'GITHUB_REPO' },
   // Laravel Developer in the private website repository: branch, edit, test, open a pull request. Never deploys.
   website_dev: { file: 'laravel-developer.yml', repo: env => env.WEBSITE_REPO, label: 'Laravel Developer job', repoSetting: 'WEBSITE_REPO' },
+  // Deploy an approved commit to booksharekh.com over SSH (changed files, backup, health check, rollback).
+  website_deploy: { file: 'deploy.yml', repo: env => env.WEBSITE_REPO, label: 'Deploy', repoSetting: 'WEBSITE_REPO' },
 };
+
+// The commit a deploy step will publish (set when the step is created, or after the merge).
+export const deployShaOf = step => { try { const sha = JSON.parse(step?.input || '{}').sha; return /^[0-9a-f]{40}$/.test(sha || '') ? sha : null; } catch { return null; } };
 export const WORKFLOW_FILE = WORKFLOWS.demo.file;
 const workflowOf = action => WORKFLOWS[action?.workflow || 'demo'];
 
@@ -30,23 +35,28 @@ export const workflowUrl = (env, wf = WORKFLOWS.demo) =>
   `https://api.github.com/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(wf.repo(env) || '')}/actions/workflows/${wf.file}`;
 
 // The exact action the owner approves. Any change to the request, plan, repo or workflow changes the hash.
-export async function jobPayload(env, task, action = null) {
+export async function jobPayload(env, task, action = null, step = null) {
   const wf = workflowOf(action);
   const plan = await latestArtifact(env, task.id, 'plan');
+  const inputs = { task_id: task.id };
+  if (wf === WORKFLOWS.website_deploy) {
+    inputs.sha = deployShaOf(step);
+    if (!inputs.sha) throw new JobError('No commit to deploy yet');
+  }
   return {
     action: action?.approvalAction || 'dispatch_github_job', repo: `${env.GITHUB_OWNER}/${wf.repo(env)}`, workflow: wf.file, ref: 'main',
-    inputs: { task_id: task.id }, task_type: task.task_type,
+    inputs, task_type: task.task_type,
     request_sha256: await sha256Hex(task.request_text), plan_sha256: await sha256Hex(plan?.content ?? task.proposal),
   };
 }
 
-export async function dispatchWorkflow(env, taskId, wf = WORKFLOWS.demo) {
+export async function dispatchWorkflow(env, taskId, wf = WORKFLOWS.demo, extraInputs = {}) {
   if (!env.GITHUB_TOKEN || !env.GITHUB_OWNER) throw new JobError('GitHub Actions secrets/settings not configured');
   if (!wf.repo(env)) throw new JobError(`${wf.label}: repository not configured (set ${wf.repoSetting} in wrangler.jsonc).`);
   let r;
   try {
     r = await fetch(`${workflowUrl(env, wf)}/dispatches`, { method: 'POST', headers: { ...githubHeaders(env), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ref: 'main', inputs: { task_id: taskId } }), signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+      body: JSON.stringify({ ref: 'main', inputs: { task_id: taskId, ...extraInputs } }), signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
   } catch (e) {
     // We cannot tell whether GitHub accepted it, so never dispatch again automatically.
     throw new JobError(`GitHub dispatch outcome unknown (${e?.name === 'TimeoutError' ? 'timeout' : 'network error'}). Check GitHub Actions before creating a new task.`, { unknown: true });
@@ -63,7 +73,7 @@ export async function runGithubJob(env, task, agentTask, action = null) {
       ORDER BY requested_at DESC LIMIT 1`).bind(agentTask.id).first();
   if (!approval) throw new JobError('No valid owner approval for this step');
   if (approval.status === 'approved') {
-    const c = await consumeApproval(env, approval.id, await jobPayload(env, task, action));
+    const c = await consumeApproval(env, approval.id, await jobPayload(env, task, action, agentTask));
     if (!c.ok) throw new JobError(c.reason === 'payload_changed'
       ? 'The task changed after it was approved, so the approval no longer applies. Create a new task.'
       : `Approval cannot be used (${c.reason}).`);
@@ -78,7 +88,7 @@ export async function runGithubJob(env, task, agentTask, action = null) {
     throw new JobError('An earlier dispatch attempt was interrupted and may have started a run. Check GitHub Actions before creating a new task.', { unknown: true });
   }
   try {
-    await dispatchWorkflow(env, task.id, wf);
+    await dispatchWorkflow(env, task.id, wf, wf === WORKFLOWS.website_deploy ? { sha: deployShaOf(agentTask) } : {});
   } catch (e) {
     await env.DB.prepare('UPDATE workflow_runs SET status=?, error=?, updated_at=CURRENT_TIMESTAMP WHERE approval_id=?')
       .bind(e.unknown ? 'unknown' : 'failed', clamp(e.message, 500), approval.id).run();
@@ -147,7 +157,15 @@ export async function runGithubMerge(env, task, agentTask) {
     if (!r.ok || !body.merged) throw new JobError(`GitHub merge failed (HTTP ${r.status}): ${clamp(body.message, 120)}`, { retryable: r.status >= 500 });
     await finishApproval(env, approval.id, true);
     await audit(env, task.id, 'PR_MERGED', 'worker', `#${payload.pr_number} ${payload.head_sha} -> ${body.sha}`);
-    await notifyTaskOwner(env, task, T.merged(env, payload.pr_number, String(body.sha).slice(0, 12))).catch(() => {});
+    // If a deploy step follows, it carries the merged commit and its approval message says it was merged.
+    const deployStep = await env.DB.prepare("SELECT id FROM agent_tasks WHERE task_id=? AND action='deploy_job' AND status='pending'").bind(task.id).first();
+    if (deployStep) {
+      await env.DB.prepare('UPDATE agent_tasks SET input=? WHERE id=?').bind(JSON.stringify({ sha: body.sha }), deployStep.id).run();
+      await env.DB.prepare('UPDATE tasks SET proposal=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
+        .bind(await deployPreviewText(env, body.sha, T.merged(env, payload.pr_number, String(body.sha).slice(0, 12))), task.id).run();
+    } else {
+      await notifyTaskOwner(env, task, T.merged(env, payload.pr_number, String(body.sha).slice(0, 12))).catch(() => {});
+    }
     return { merged_sha: body.sha, pr_number: payload.pr_number };
   } catch (e) {
     if (e?.retryable) await releaseApproval(env, approval.id); else await finishApproval(env, approval.id, false);
@@ -162,4 +180,19 @@ export async function closePullRequest(env, taskId) {
   const r = await fetch(`${websiteApi(env)}/pulls/${n}`, { method: 'PATCH', headers: { ...githubHeaders(env), 'Content-Type': 'application/json' },
     body: JSON.stringify({ state: 'closed' }), signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) }).catch(() => null);
   return Boolean(r?.ok);
+}
+
+// What a deploy will change on the live site: files between the last deployed commit and this one.
+export async function deployPreviewText(env, sha, header = '') {
+  const last = await env.DB.prepare("SELECT value FROM settings WHERE key='last_deployed_sha'").first().catch(() => null);
+  const base = last?.value || 'd56611b'; // the cPanel export the repository started from
+  const lines = header ? [header, ''] : [];
+  lines.push(T.deployHead(env, sha.slice(0, 12)));
+  try {
+    const r = await fetch(`${websiteApi(env)}/compare/${base}...${sha}`, { headers: githubHeaders(env), signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+    const files = r.ok ? ((await r.json()).files || []).map(x => x.filename)
+      .filter(n => !/^(\.github\/|tests\/|website-kit\/|storage\/|vendor\/)|\.md$/.test(n)) : null;
+    if (files) lines.push(T.deployFiles(env, files.length), ...files.slice(0, 12).map(n => `• ${n}`), ...(files.length > 12 ? [`… +${files.length - 12}`] : []));
+  } catch { /* preview is best effort; the deploy job computes the exact list */ }
+  return clamp(lines.join('\n'), 3000);
 }

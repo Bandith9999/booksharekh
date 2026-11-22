@@ -95,6 +95,9 @@ function githubSite(state = {}) {
       return state.mergeStatus ? Response.json({ message: 'Head branch was modified' }, { status: state.mergeStatus }) : Response.json({ merged: true, sha: 'c'.repeat(40) });
     }
     if (p.endsWith('/pulls/3') && method === 'PATCH') { state.closed = JSON.parse(init.body); return Response.json({ state: 'closed' }); }
+    if (p.endsWith('/actions/workflows/deploy.yml/dispatches')) { (state.deploys ||= []).push(JSON.parse(init.body)); return new Response(null, { status: 204 }); }
+    if (p.includes('/compare/')) { state.compare = p; return Response.json({ files: [{ filename: 'resources/views/frontend/home.blade.php' }, { filename: 'tests/Feature/X.php' }] }); }
+    if (p.endsWith('/commits/main')) return Response.json({ sha: 'd'.repeat(40), commit: { message: 'translate New Releases into Khmer (#8)\n\nbody' } });
     return new Response('nf', { status: 404 });
   }];
 }
@@ -113,7 +116,7 @@ async function developToMergeApproval(state = {}) {
   return { env, calls, task, state };
 }
 
-test('/develop: approved merge merges exactly the reviewed commit; nothing is deployed', async () => {
+test('/develop: approved merge merges exactly the reviewed commit, then asks to deploy it', async () => {
   const { env, calls, task, state } = await developToMergeApproval();
   assert.equal(latestTask(env).status, 'awaiting_approval', 'waits for the owner after the PR is opened');
   const review = sent(calls).at(-1);
@@ -125,8 +128,54 @@ test('/develop: approved merge merges exactly the reviewed commit; nothing is de
   await telegram(env, press(approveButton(calls)));
   await drain(env);
   assert.deepEqual([state.merge.sha, state.merge.merge_method], ['a'.repeat(40), 'squash'], 'merges only the approved commit');
+  assert.equal(latestTask(env).status, 'awaiting_approval', 'next: the deploy approval');
+  const deployMsg = sent(calls).at(-1);
+  assert.match(deployMsg.text, /✅ Merged pull request #3 into main \(commit cccccccccccc\)[\s\S]*🚀 Ready to deploy commit cccccccccccc[\s\S]*• resources\/views\/frontend\/home\.blade\.php[\s\S]*Proposed action: Deploy this commit to booksharekh\.com/);
+  assert.doesNotMatch(deployMsg.text, /tests\/Feature/, 'only files that go to the server are listed');
+  assert.match(state.compare, /compare\/d56611b\.\.\.c{40}$/, 'first deploy compares from the cPanel import');
+  assert.equal(state.deploys, undefined, 'nothing deployed before approval');
+  assert.equal(JSON.parse(approvals(env, task.id).find(a => a.action_type === 'deploy_website').payload).inputs.sha, 'c'.repeat(40));
+
+  await telegram(env, press(approveButton(calls)));
+  await drain(env);
+  assert.deepEqual(state.deploys, [{ ref: 'main', inputs: { task_id: task.id, sha: 'c'.repeat(40) } }], 'deploys exactly the merged commit');
+  assert.equal((await (await job(env, 'GET', `/job/${task.id}`)).json()).deploy_sha, 'c'.repeat(40), 'the workflow can verify the commit');
+  const done = await job(env, 'POST', '/job-result', { task_id: task.id, status: 'completed', note: 'Deployed 1 file(s) to booksharekh.com. Backup: 20261122-120000.',
+    run_url: 'https://github.com/owner/booksharekh-website/actions/runs/11', deployed_sha: 'c'.repeat(40) });
+  assert.equal(done.status, 200);
   assert.equal(latestTask(env).status, 'completed');
-  assert.match(sent(calls).map(m => m.text).join('\n'), /✅ Merged pull request #3 into main \(commit cccccccccccc\)[\s\S]*live site has not changed/);
+  assert.match(lastText(calls), /✅ Deployed to booksharekh\.com\.\nDeployed 1 file/);
+  assert.equal(env.DB.db.prepare("SELECT value FROM settings WHERE key='last_deployed_sha'").get().value, 'c'.repeat(40));
+});
+
+test('/deploy: approval bound to the current main commit; a changed commit is refused; a failed deploy is reported', async () => {
+  const state = {};
+  const env = makeEnv({ WEBSITE_REPO: 'booksharekh-website' });
+  const calls = mockFetch([routes.telegram, githubSite(state)]);
+  env.DB.db.prepare("INSERT INTO settings (key,value) VALUES ('last_deployed_sha', ?)").run('b'.repeat(40));
+  await telegram(env, msg('/deploy'));
+  const task = latestTask(env);
+  assert.equal(task.task_type, 'website_deploy');
+  assert.match(lastText(calls), /main: translate New Releases into Khmer \(#8\)\n\n🚀 Ready to deploy commit dddddddddddd/);
+  assert.match(state.compare, /compare\/b{40}\.\.\.d{40}$/, 'compares from the last deployed commit');
+
+  // Tampering with the commit after approval must not deploy it.
+  const step = steps(env, task.id)[0];
+  await telegram(env, press(approveButton(calls)));
+  env.DB.db.prepare('UPDATE agent_tasks SET input=? WHERE id=?').run(JSON.stringify({ sha: 'e'.repeat(40) }), step.id);
+  await drain(env);
+  assert.equal(state.deploys, undefined, 'changed commit refused');
+  assert.equal(latestTask(env).status, 'failed');
+
+  const env2 = makeEnv({ WEBSITE_REPO: 'booksharekh-website' });
+  const c2 = mockFetch([routes.telegram, githubSite(state)]);
+  await telegram(env2, msg('/deploy'));
+  await telegram(env2, press(approveButton(c2)));
+  await drain(env2);
+  const t2 = latestTask(env2);
+  await job(env2, 'POST', '/job-result', { task_id: t2.id, status: 'failed', note: 'Site check failed (HTTP 500) after deploy; the previous files were restored automatically.' });
+  assert.match(lastText(c2), /❌ Deploy failed\.\nSite check failed \(HTTP 500\)[\s\S]*restored automatically/);
+  assert.equal(env2.DB.db.prepare("SELECT value FROM settings WHERE key='last_deployed_sha'").get(), undefined, 'a failed deploy is not recorded');
 });
 
 test('/develop: Reject closes the pull request; a PR changed after approval is not merged', async () => {
@@ -154,7 +203,7 @@ test('/develop: a failed job cancels the merge step', async () => {
   const task = latestTask(env);
   await job(env, 'POST', '/job-result', { task_id: task.id, status: 'failed', note: 'tests failed' });
   assert.equal(latestTask(env).status, 'failed');
-  assert.deepEqual(steps(env, task.id).map(s => s.status), ['completed', 'failed', 'cancelled']);
+  assert.deepEqual(steps(env, task.id).map(s => s.status), ['completed', 'failed', 'cancelled', 'cancelled']);
 });
 
 test('/develop: plan → approval bound to the website repo → Laravel Developer job → PR link, nothing deployed', async () => {
@@ -166,7 +215,7 @@ test('/develop: plan → approval bound to the website repo → Laravel Develope
   const task = latestTask(env);
   assert.equal(task.task_type, 'website_code_change');
   assert.equal(task.status, 'awaiting_approval');
-  assert.deepEqual(steps(env, task.id).map(s => `${s.agent}.${s.action}`), ['manager.plan', 'laravel_developer.code_change_job', 'laravel_developer.merge_pr']);
+  assert.deepEqual(steps(env, task.id).map(s => `${s.agent}.${s.action}`), ['manager.plan', 'laravel_developer.code_change_job', 'laravel_developer.merge_pr', 'laravel_developer.deploy_job']);
   const ap = approvals(env, task.id)[0];
   assert.equal(ap.action_type, 'dispatch_code_change');
   assert.deepEqual([JSON.parse(ap.payload).repo, JSON.parse(ap.payload).workflow], ['owner/booksharekh-website', 'laravel-developer.yml']);

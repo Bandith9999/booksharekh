@@ -5,12 +5,12 @@ import { reply, tg } from './telegram.js';
 import { AGENTS, TOOLS, isImplemented, validateRegistry } from './agents/registry.js';
 import { fallbackRoute, freeModels, paidEnabled, resolveRoute, validateRoute } from './ai/model-router.js';
 import { PROVIDER_NAMES, getProvider, normalizeProvider } from './ai/provider-factory.js';
-import { approveStep, cancelTask, createBookImport, createTask, legacyDecision, rejectStep, resumeTask } from './orchestration/engine.js';
+import { approveStep, cancelTask, createBookImport, createDeployTask, createTask, legacyDecision, rejectStep, resumeTask } from './orchestration/engine.js';
 import { SourceDownError, getCandidate, searchPublicDomain } from './books/gutenberg.js';
 import { T, tr } from './i18n.js';
 import { candidatesMessage, findForRequest, recentPendingRequests, rejectRequest, requestKeyboard } from './books/requests.js';
 import { budgets, tokensUsed } from './orchestration/budget.js';
-import { WORKFLOWS, WORKFLOW_FILE, githubHeaders, workflowUrl } from './orchestration/github.js';
+import { WORKFLOWS, WORKFLOW_FILE, deployPreviewText, githubHeaders, workflowUrl } from './orchestration/github.js';
 import { checkWebsite, formatHealth } from './website/health.js';
 import { WebsiteApiError, apiConfigured, apiHealth, formatBooks, latestBooks, searchBooks } from './website/laravel-api.js';
 
@@ -18,6 +18,7 @@ const HELP = `BookShareKH Manager
 /task <request> — plan a task (approval needed before anything runs)
 /develop <change> — website code change: the Laravel Developer opens a pull request (approval first; never deploys)
 /website — live site health and security check
+/deploy — put merged website code live (approval first)
 /books [latest N | search <title>] — books from the website API
 /research <title> — find a public-domain copy (Project Gutenberg) and prepare a draft
 /requests — pending book requests from visitors
@@ -270,6 +271,17 @@ export async function handleMessage(env, m) {
       if (r.rateLimited) return reply(env, chat, T.rateLimited(env, r.limit, r.period));
       if (r.failed) return;
       return reply(env, chat, T.developReceived(env, r.id));
+    }
+    case 'deploy': {
+      if (!env.WEBSITE_REPO) return reply(env, chat, 'The website repository is not connected yet (WEBSITE_REPO is not set).');
+      const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(env.WEBSITE_REPO)}/commits/main`,
+        { headers: githubHeaders(env), signal: AbortSignal.timeout(15000) });
+      const head = r.ok ? await r.json() : null;
+      if (!/^[0-9a-f]{40}$/.test(head?.sha || '')) return reply(env, chat, T.deployNothing(env));
+      const preview = await deployPreviewText(env, head.sha, `main: ${clamp(String(head.commit?.message || '').split('\n')[0], 120)}`);
+      const t = await createDeployTask(env, { userId: user, sha: head.sha, preview });
+      if (t.rateLimited) return reply(env, chat, T.rateLimited(env, t.limit, t.period));
+      return; // the approval message with the file list was sent by the engine
     }
     case 'website': {
       await audit(env, null, 'WEBSITE_CHECK', user, c.args || 'status');

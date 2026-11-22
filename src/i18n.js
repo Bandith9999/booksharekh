@@ -14,6 +14,7 @@ export const T = {
 /requests — សំណើសៀវភៅដែលកំពុងរង់ចាំ
 /books [latest N | search <ចំណងជើង>] — សៀវភៅលើវេបសាយ
 /website — ពិនិត្យវេបសាយ
+/deploy — ដាក់កូដដែលបាន merge ឲ្យដំណើរការលើវេបសាយ
 /status · /pending · /taskstatus <id>
 /approve · /reject · /cancel · /resume <id>
 /agents · /diag · /memory · /remember key=value
@@ -81,6 +82,14 @@ export const T = {
   published: (env, p, bookId, slug, requestNote) => pick(env, `✅ Published "${p.title}" by ${p.author} on booksharekh.com (book #${bookId}${slug ? `, /${slug}` : ''}).${requestNote}`, `✅ បានផ្សព្វផ្សាយ "${p.title}" (book #${bookId})។${requestNote}`),
   requestDone: (env, id) => pick(env, `\nBook request #${id} marked done.`, ` សំណើ #${id} រួចរាល់។`),
   sourceDown: env => pick(env, '🔧 The book source (Project Gutenberg) is temporarily unavailable. Please try again later.', '🔧 ប្រភពសៀវភៅ (Project Gutenberg) មិនដំណើរការបណ្ដោះអាសន្ន។ សូមសាកម្តងទៀតពេលក្រោយ។'),
+  deployHead: (env, sha) => pick(env, `🚀 Ready to deploy commit ${sha} to booksharekh.com.`, `🚀 រួចរាល់ deploy commit ${sha} ទៅ booksharekh.com`),
+  deployFiles: (env, n) => pick(env, `Files that will change (${n}):`, `ឯកសារដែលនឹងប្តូរ (${n}):`),
+  deployDone: (env, ok, note, url) => pick(env, `${ok ? '✅ Deployed to booksharekh.com.' : '❌ Deploy failed.'}
+${note}${url ? `
+${url}` : ''}`, `${ok ? '✅ បាន deploy ទៅ booksharekh.com ហើយ។' : '❌ Deploy បរាជ័យ។'}
+${note}${url ? `
+${url}` : ''}`),
+  deployNothing: env => pick(env, 'Nothing new to deploy: main has no commits.', 'មិនមានអ្វីថ្មីសម្រាប់ deploy ទេ។'),
   noPending: env => pick(env, 'No pending book requests.', 'មិនមានសំណើសៀវភៅរង់ចាំទេ។'),
   requestRejected: (env, id) => pick(env, `Book request #${id} rejected.`, `🚫 សំណើ #${id} ត្រូវបានបដិសេធ។`),
   booksHeading: (env, n) => pick(env, `Latest ${n} books:`, `សៀវភៅថ្មីៗ ${n}:`),

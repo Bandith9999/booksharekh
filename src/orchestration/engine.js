@@ -76,6 +76,19 @@ export async function createBookImport(env, { userId, book, requestId = null }) 
   return r.ok ? { id } : { id, failed: true, reason: r.reason };
 }
 
+// /deploy: publish the current main commit (already merged) to the live site, after approval.
+export async function createDeployTask(env, { userId, sha, preview }) {
+  const limited = await rateLimited(env, userId);
+  if (limited) return limited;
+  const id = newId('BSK');
+  await env.DB.prepare('INSERT INTO tasks (id,telegram_user_id,request_text,task_type,proposal,status) VALUES (?,?,?,?,?,?)')
+    .bind(id, String(userId), `Deploy main @ ${sha}`, 'website_deploy', clamp(preview, 3000), 'planning').run();
+  await insertStep(env, { taskId: id, agent: 'laravel_developer', action: 'deploy_job', status: 'pending', input: { sha } });
+  await audit(env, id, 'TASK_CREATED', userId, `website_deploy ${sha}`);
+  await advance(env, id); // sends the deploy approval
+  return { id };
+}
+
 export async function createTask(env, { userId, description, type: forcedType = null }) {
   const limited = await rateLimited(env, userId);
   if (limited) return limited;
@@ -88,7 +101,11 @@ export async function createTask(env, { userId, description, type: forcedType = 
   const job = DEMO_JOB_STEP[type];
   const jobId = await insertStep(env, { taskId: id, agent: job.agent, action: job.action, status: 'pending', dependsOn: [planId] });
   // Website changes: after the PR is opened, the owner approves merging that exact commit.
-  if (type === 'website_code_change') await insertStep(env, { taskId: id, agent: 'laravel_developer', action: 'merge_pr', status: 'pending', dependsOn: [jobId] });
+  if (type === 'website_code_change') {
+    const mergeId = await insertStep(env, { taskId: id, agent: 'laravel_developer', action: 'merge_pr', status: 'pending', dependsOn: [jobId] });
+    // After the merge, the owner approves deploying that exact commit to the live site.
+    await insertStep(env, { taskId: id, agent: 'laravel_developer', action: 'deploy_job', status: 'pending', dependsOn: [mergeId] });
+  }
   await audit(env, id, 'TASK_CREATED', userId, type);
   try {
     await enqueueStep(env, planId);
@@ -115,7 +132,7 @@ export async function advance(env, taskId) {
 }
 
 async function payloadFor(env, task, action, step = null) {
-  if (action.kind === 'github_job') return jobPayload(env, task, action);
+  if (action.kind === 'github_job') return jobPayload(env, task, action, step);
   if (action.kind === 'book_draft') return draftPayload(task, step);
   if (action.kind === 'book_publish') return publishPayload(env, task);
   if (action.kind === 'github_merge') return mergePayload(env, task);
