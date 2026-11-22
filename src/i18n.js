@@ -80,6 +80,7 @@ export const T = {
      b.dups ? `⚠️ មានសៀវភៅនេះរួចហើយ (#${b.dups}) — នឹងមិន publish ទេ។` : ''].filter(Boolean).join('\n')),
   published: (env, p, bookId, slug, requestNote) => pick(env, `✅ Published "${p.title}" by ${p.author} on booksharekh.com (book #${bookId}${slug ? `, /${slug}` : ''}).${requestNote}`, `✅ បានផ្សព្វផ្សាយ "${p.title}" (book #${bookId})។${requestNote}`),
   requestDone: (env, id) => pick(env, `\nBook request #${id} marked done.`, ` សំណើ #${id} រួចរាល់។`),
+  sourceDown: env => pick(env, '🔧 The book source (Project Gutenberg) is temporarily unavailable. Please try again later.', '🔧 ប្រភពសៀវភៅ (Project Gutenberg) មិនដំណើរការបណ្ដោះអាសន្ន។ សូមសាកម្តងទៀតពេលក្រោយ។'),
   noPending: env => pick(env, 'No pending book requests.', 'មិនមានសំណើសៀវភៅរង់ចាំទេ។'),
   requestRejected: (env, id) => pick(env, `Book request #${id} rejected.`, `🚫 សំណើ #${id} ត្រូវបានបដិសេធ។`),
   booksHeading: (env, n) => pick(env, `Latest ${n} books:`, `សៀវភៅថ្មីៗ ${n}:`),

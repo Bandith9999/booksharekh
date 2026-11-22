@@ -182,3 +182,14 @@ test('non-owners cannot import books or act on requests', async () => {
   assert.equal(state.requests[0].status, 'pending');
   assert.equal(calls.filter(c => c.url.includes('booksharekh.com') || c.url.includes('gutendex')).length, 0);
 });
+
+test('a book-source outage gives a short notice instead of a raw timeout error', async () => {
+  const env = apiEnv({ BOT_LANGUAGE: 'km' });
+  const calls = mockFetch([routes.telegram, [/gutendex/, () => { throw new DOMException('The operation was aborted due to timeout', 'TimeoutError'); }]]);
+  await telegram(env, msg('/research pride and prejudice'));
+  assert.equal(lastText(calls), '🔧 ប្រភពសៀវភៅ (Project Gutenberg) មិនដំណើរការបណ្ដោះអាសន្ន។ សូមសាកម្តងទៀតពេលក្រោយ។');
+  const c2 = mockFetch([routes.telegram, [/gutendex/, () => new Response('Temporarily Down for Maintenance', { status: 503 })]]);
+  await telegram(env, press('bi:2701:0'));
+  assert.match(lastText(c2), /🔧 ប្រភពសៀវភៅ/);
+  assert.doesNotMatch(sent(c2).map(m => m.text).join('\n'), /aborted|មិនអាចដំណើរការសារ/, 'no raw error');
+});

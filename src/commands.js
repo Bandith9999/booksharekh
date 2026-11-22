@@ -6,7 +6,7 @@ import { AGENTS, TOOLS, isImplemented, validateRegistry } from './agents/registr
 import { fallbackRoute, freeModels, paidEnabled, resolveRoute, validateRoute } from './ai/model-router.js';
 import { PROVIDER_NAMES, getProvider, normalizeProvider } from './ai/provider-factory.js';
 import { approveStep, cancelTask, createBookImport, createTask, legacyDecision, rejectStep, resumeTask } from './orchestration/engine.js';
-import { getCandidate, searchPublicDomain } from './books/gutenberg.js';
+import { SourceDownError, getCandidate, searchPublicDomain } from './books/gutenberg.js';
 import { T, tr } from './i18n.js';
 import { candidatesMessage, findForRequest, recentPendingRequests, rejectRequest, requestKeyboard } from './books/requests.js';
 import { budgets, tokensUsed } from './orchestration/budget.js';
@@ -309,7 +309,10 @@ export async function handleMessage(env, m) {
     }
     case 'research': {
       if (!c.args) return reply(env, chat, 'Use: /research Pride and Prejudice');
-      const m = candidatesMessage(c.args, await searchPublicDomain(c.args, { languages: env.BOOK_LANGUAGES }), 0, env);
+      let found;
+      try { found = await searchPublicDomain(c.args, { languages: env.BOOK_LANGUAGES }); }
+      catch (e) { if (e instanceof SourceDownError) return reply(env, chat, T.sourceDown(env)); throw e; }
+      const m = candidatesMessage(c.args, found, 0, env);
       return reply(env, chat, m.text, m.reply_markup ? { reply_markup: m.reply_markup } : {});
     }
     case 'agents': return reply(env, chat, await agentsText(env));
@@ -346,6 +349,7 @@ export async function handleCallback(env, q) {
     if ((m = /^rr:(\d{1,10})$/.exec(data))) { await rejectRequest(env, Number(m[1]), user); return reply(env, chat, T.requestRejected(env, m[1])); }
   } catch (e) {
     if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
+    if (e instanceof SourceDownError) return reply(env, chat, T.sourceDown(env));
     throw e;
   }
   if ((m = /^(approve|reject):(BSK-[a-f0-9-]{36})$/.exec(data))) { // Phase 1 buttons

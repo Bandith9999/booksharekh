@@ -38,11 +38,19 @@ function toCandidate(b) {
   };
 }
 
+// The book source is down or slow (e.g. gutenberg.org maintenance). Retryable; shown to the owner as a short notice.
+export class SourceDownError extends Error {
+  constructor(detail) { super(`Book source unavailable (${detail})`); this.name = 'SourceDownError'; this.retryable = true; }
+}
+
 async function getJson(url) {
-  const r = await fetch(url, { headers: UA, signal: AbortSignal.timeout(15000) });
+  let r;
+  try { r = await fetch(url, { headers: UA, signal: AbortSignal.timeout(20000) }); }
+  catch (e) { throw new SourceDownError(e?.name === 'TimeoutError' ? 'timeout' : 'network'); }
   if (r.status === 404) return null;
-  if (!r.ok) throw Object.assign(new Error(`Project Gutenberg search failed (HTTP ${r.status})`), { retryable: r.status >= 500 });
-  return r.json();
+  if (r.status >= 500 || r.status === 429) throw new SourceDownError(`HTTP ${r.status}`);
+  if (!r.ok) throw Object.assign(new Error(`Project Gutenberg search failed (HTTP ${r.status})`), { retryable: false });
+  return r.json().catch(() => { throw new SourceDownError('bad response'); });
 }
 
 // English editions only by default (BOOK_LANGUAGES in wrangler.jsonc, e.g. "en" or "en,fr").
