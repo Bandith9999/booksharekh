@@ -34,7 +34,16 @@ async function call(env, method, path, { params = {}, json, form, timeout = TIME
   } catch (e) {
     throw new WebsiteApiError(e?.name === 'TimeoutError' ? 'Website API timed out' : `Website API network error: ${clamp(e?.message, 80)}`, e?.name === 'TimeoutError' ? 'timeout' : 'network');
   }
-  if (r.status === 401 || r.status === 403) throw new WebsiteApiError(`Website API refused the token (HTTP ${r.status}). Create a new token in Laravel and run \`npx wrangler secret put LARAVEL_API_TOKEN\`.`, 'auth');
+  if (r.status === 401 || r.status === 403) {
+    // Tell apart: Laravel refusing the key (JSON {error}) vs Cloudflare/firewall blocking before Laravel (HTML).
+    const text = await r.text().catch(() => '');
+    let laravel = null;
+    try { laravel = JSON.parse(text)?.error ?? null; } catch { /* not JSON: blocked before Laravel */ }
+    const fix = 'Create a key with all abilities (php artisan ai:token ... see README) and run `npx wrangler secret put LARAVEL_API_TOKEN`.';
+    if (laravel) throw new WebsiteApiError(`Website API refused the key (HTTP ${r.status}: ${clamp(laravel, 100)}). ${fix}`, 'auth');
+    const byCloudflare = /cloudflare|error code: 10\d\d/i.test(text) || r.headers.get('cf-mitigated');
+    throw new WebsiteApiError(`The request was blocked before reaching Laravel (HTTP ${r.status}, ${byCloudflare ? 'by Cloudflare' : 'by the server firewall'}): ${clamp(text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '), 100)}`, 'blocked');
+  }
   if (r.status === 404) throw new WebsiteApiError('Website API endpoint not found (HTTP 404): the AI API is not installed on the site yet.', 'not_installed');
   if (r.status === 429) throw new WebsiteApiError('Website API rate limit reached; try again shortly.', 'rate_limit');
   if (r.status >= 500) throw new WebsiteApiError(`Website API error (HTTP ${r.status}).`, 'server');

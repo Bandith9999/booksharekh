@@ -58,10 +58,16 @@ test('/books reads through the restricted Laravel API, and explains when it is n
   assert.match(lastText(calls), /Books matching "Dune":\n\(no books found\)/);
 
   const bad = makeEnv({ LARAVEL_API_URL: 'https://booksharekh.com', LARAVEL_API_TOKEN: 'x' });
-  const c3 = mockFetch([routes.telegram, [API, () => new Response('no', { status: 401 })]]);
+  const c3 = mockFetch([routes.telegram, [API, () => Response.json({ error: 'invalid or revoked token' }, { status: 401 })]]);
   await telegram(bad, msg('/books'));
-  assert.match(lastText(c3), /refused the token \(HTTP 401\)[\s\S]*LARAVEL_API_TOKEN/);
+  assert.match(lastText(c3), /refused the key \(HTTP 401: invalid or revoked token\)[\s\S]*LARAVEL_API_TOKEN/);
   assert.doesNotMatch(lastText(c3), /x"|Bearer/);
+  const c5 = mockFetch([routes.telegram, [API, () => Response.json({ error: 'token lacks the books:read ability' }, { status: 403 })]]);
+  await telegram(bad, msg('/books'));
+  assert.match(lastText(c5), /HTTP 403: token lacks the books:read ability/);
+  const c6 = mockFetch([routes.telegram, [API, () => new Response('<html><title>Access denied</title>error code: 1010</html>', { status: 403, headers: { server: 'cloudflare' } })]]);
+  await telegram(bad, msg('/books'));
+  assert.match(lastText(c6), /blocked before reaching Laravel \(HTTP 403, by Cloudflare\)/);
 
   const http = makeEnv({ LARAVEL_API_URL: 'http://booksharekh.com', LARAVEL_API_TOKEN: 'x' });
   const c4 = mockFetch([routes.telegram]);
