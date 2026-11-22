@@ -48,7 +48,10 @@ async function insertStep(env, { taskId, agent, action, status, dependsOn = [], 
 export async function createTask(env, { userId, description }) {
   const limit = Number(env.TASK_RATE_LIMIT_PER_HOUR) || 20;
   const recent = await env.DB.prepare("SELECT COUNT(*) n FROM tasks WHERE telegram_user_id=? AND created_at > datetime('now','-1 hour')").bind(String(userId)).first();
-  if (recent.n >= limit) return { rateLimited: true, limit };
+  if (recent.n >= limit) return { rateLimited: true, limit, period: 'hour' };
+  const dayLimit = Number(env.DAILY_TASK_LIMIT) || 50;
+  const today = await env.DB.prepare("SELECT COUNT(*) n FROM tasks WHERE telegram_user_id=? AND created_at >= date('now')").bind(String(userId)).first();
+  if (today.n >= dayLimit) return { rateLimited: true, limit: dayLimit, period: 'day (UTC)' };
 
   const id = newId('BSK');
   const type = classifyTask(description);
@@ -137,6 +140,7 @@ export async function runAgentTask(env, agentTaskId) {
 
 async function handleStepError(env, task, at, e) {
   const message = e?.message || String(e);
+  if (e?.kind === 'quota') return pauseStep(env, task, at, message);
   if (e?.retryable && at.attempts < at.max_attempts &&
       await transition(env.DB, 'agent_tasks', at.id, 'queued', { from: ['running'], set: { error: clamp(message, 500) } })) {
     await audit(env, task.id, 'STEP_RETRY', 'worker', `${at.agent}.${at.action} attempt ${at.attempts}/${at.max_attempts}: ${message}`);
@@ -160,7 +164,29 @@ async function failStep(env, task, at, message) {
 }
 
 const cancelOpenSteps = (env, taskId) => env.DB.prepare(`UPDATE agent_tasks SET status='cancelled', updated_at=CURRENT_TIMESTAMP
-    WHERE task_id=? AND status IN ('pending','awaiting_approval','queued','revision_required')`).bind(taskId).run();
+    WHERE task_id=? AND status IN ('pending','awaiting_approval','queued','paused','revision_required')`).bind(taskId).run();
+
+// Daily quota or budget exhausted: stop and tell the owner. Never switch to another (paid) provider.
+async function pauseStep(env, task, at, message) {
+  await transition(env.DB, 'agent_tasks', at.id, 'paused', { from: ['running'], set: { error: clamp(message, 500) } });
+  await transition(env.DB, 'tasks', task.id, 'paused', { set: { result_note: clamp(message, 500) } });
+  await audit(env, task.id, 'PAUSED', 'worker', `${at.agent}.${at.action}: ${message}`);
+  const ref = `${task.id.slice(0, 17)}…`;
+  await notify(env, task, `⏸ Task ${task.id} paused: ${clamp(message, 300)}\n\nNo paid AI provider was used. Google's free quota resets at midnight Pacific time; local limits reset at 00:00 UTC.\nSend /resume ${ref} to continue, or /cancel ${ref}.`);
+  return { paused: true };
+}
+
+export async function resumeTask(env, taskId, userId) {
+  const task = await getTask(env, taskId);
+  if (!task || task.telegram_user_id !== String(userId)) return { ok: false, reason: 'not_found' };
+  if (task.status !== 'paused') return { ok: false, reason: `status ${task.status}` };
+  const paused = (await listAgentTasks(env, taskId)).filter(s => s.status === 'paused');
+  const target = paused.some(s => s.action === 'plan') ? 'planning' : 'running';
+  if (!await transition(env.DB, 'tasks', taskId, target, { from: ['paused'] })) return { ok: false, reason: 'already_resumed' };
+  for (const s of paused) if (await transition(env.DB, 'agent_tasks', s.id, 'queued', { from: ['paused'] })) await enqueueStep(env, s.id);
+  await audit(env, taskId, 'RESUMED', userId, `${paused.length} step(s)`);
+  return { ok: true };
+}
 
 // Dead-letter queue: a step whose message failed past the queue's retry limit.
 export async function handleDeadLetter(env, agentTaskId) {

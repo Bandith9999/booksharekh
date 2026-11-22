@@ -130,14 +130,16 @@ Send:
 
 ## G. AI providers and models
 
-Each agent uses a **tier**, and each tier maps to a provider and model in `wrangler.jsonc`:
+**Default: $0 mode.** All seven agents use Google Gemini `gemini-3.8-flash` on the free API tier, and paid AI is locked (see section I).
 
-| Variable | Used by | Default |
+Each agent uses a **tier**, and each tier maps to a provider and model in `wrangler.jsonc`. In $0 mode only the default tier is set, so every tier inherits it:
+
+| Variable | Used by | $0 default |
 |---|---|---|
-| `AI_DEFAULT_PROVIDER` / `AI_DEFAULT_MODEL` | Manager | `anthropic` / `claude-sonnet-5-5` |
-| `AI_FAST_PROVIDER` / `AI_FAST_MODEL` | Book Researcher, Content Creator, Video Creator | `anthropic` / `claude-haiku-5-5` |
-| `AI_REVIEW_PROVIDER` / `AI_REVIEW_MODEL` | EPUB/PDF Editor, QA Reviewer | `anthropic` / `claude-sonnet-5-5` |
-| `AI_CODE_PROVIDER` / `AI_CODE_MODEL` | Laravel Developer | unset → default tier |
+| `AI_DEFAULT_PROVIDER` / `AI_DEFAULT_MODEL` | Manager, and every tier left unset | `google` / `gemini-3.8-flash` |
+| `AI_FAST_PROVIDER` / `AI_FAST_MODEL` | Book Researcher, Content Creator, Video Creator | unset → default |
+| `AI_REVIEW_PROVIDER` / `AI_REVIEW_MODEL` | EPUB/PDF Editor, QA Reviewer | unset → default |
+| `AI_CODE_PROVIDER` / `AI_CODE_MODEL` | Laravel Developer | unset → default |
 
 Providers are `anthropic`, `openai`, `google` (`gemini` also works) and `mock`. Each provider needs its key as a Cloudflare secret: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GEMINI_API_KEY`. The Phase 1 names `AI_PROVIDER` / `AI_MODEL` still work for the default tier.
 
@@ -167,7 +169,69 @@ npx wrangler deploy
 - Phase 1 code only understands `pending` tasks, so anything Phase 2 left in `planning`, `awaiting_approval` or `queued` will stay there. Cancel those first: `UPDATE tasks SET status='cancelled' WHERE status IN ('planning','awaiting_approval','queued')` via `wrangler d1 execute --remote`.
 - The queues can stay. Delete them with `wrangler queues delete` only after rolling back.
 
-## I. Troubleshooting
+## I. $0 mode: Gemini free tier
+
+**Setup**
+1. In Google AI Studio, create an API key in a Google Cloud project **with no billing account linked**. Linking billing moves the project to the paid tier.
+2. Run `npx wrangler secret put GEMINI_API_KEY`.
+3. In AI Studio, open the rate-limit page (https://aistudio.google.com/rate-limit) and note the RPM and RPD shown for `gemini-3.8-flash`. Set `AI_MAX_REQUESTS_PER_MINUTE` and `AI_MAX_REQUESTS_PER_DAY` in `wrangler.jsonc` *below* those numbers. Google publishes free-tier limits only there.
+4. Deploy, then send `/diag`. It checks the model with a metadata call that uses no generation quota.
+
+**Paid AI lock**
+- `AI_PAID_ENABLED=false` lets only the mock provider and the Gemini models in `AI_FREE_MODELS` run. Anthropic, OpenAI and paid-only Gemini models are refused everywhere: at run time, by `/agent … set`, and as fallbacks.
+- To unlock paid AI, the owner edits `wrangler.jsonc` and redeploys. The bot cannot unlock it.
+- If a fallback is configured but locked, a Gemini outage is retried on Gemini only, and the blocked fallback is written to the audit log.
+
+**Limits** (set in `wrangler.jsonc`)
+
+| Variable | Default | What happens when it's reached |
+|---|---|---|
+| `AI_MAX_REQUESTS_PER_MINUTE` | 5 | The call waits 60 s, then retries |
+| `AI_MAX_REQUESTS_PER_DAY` | 100 | The task **pauses** |
+| `DAILY_TOKEN_BUDGET` | 300,000 | The task **pauses** |
+| `TASK_TOKEN_BUDGET` | 30,000 | The task fails |
+| `DAILY_TASK_LIMIT` | 20 | `/task` is refused |
+| `TASK_RATE_LIMIT_PER_HOUR` | 10 | `/task` is refused |
+
+Local daily counters reset at 00:00 UTC.
+
+**When a quota runs out**
+- If Gemini reports its daily quota is used up, or a local daily limit is reached, the task **pauses** and you get a Telegram message. Nothing switches to another provider.
+- Google resets its quota at midnight Pacific time. Send `/resume <task-id>` after that, or `/cancel <task-id>`.
+- Per-minute limits are retried after the delay Gemini asks for.
+
+**Free-tier data handling (read before sending real website content)**
+Google's Gemini API terms for unpaid services say:
+- Google uses submitted content and responses to improve its products.
+- Human reviewers may read, annotate and process API input and output (disconnected from your account first).
+- "Do not submit sensitive, confidential, or personal information to the Unpaid Services."
+- Users must be 18 or older.
+
+What this means for BookShareKH:
+- Everything in `/task` text and in `/remember` settings is sent to Gemini. `/remember` refuses values that look like passwords, keys or tokens.
+- The EPUB/PDF Editor and the Laravel Developer handle private files and source code, so they refuse free-tier Gemini. That changes only if you set `GEMINI_PAID_TIER=true` (a project with billing) or knowingly set `AI_ALLOW_CONFIDENTIAL_ON_FREE_TIER=true`.
+- Customer data, unpublished manuscripts, credentials and private code need a paid tier.
+
+**What stays free, and what doesn't**
+
+| Component | Free allowance (checked 2026-11-22) | Fits this bot? |
+|---|---|---|
+| Gemini API, free tier | RPM/RPD per project shown in AI Studio | Yes, for planning and short drafts within your quota |
+| Cloudflare Workers Free | 100,000 requests/day; 10 ms CPU per request; 50 outbound requests per run | Yes; the handlers mostly wait on I/O. Watch the CPU-time metric in the dashboard |
+| Cloudflare Queues (Free) | 10,000 operations/day; messages kept 24 h | Yes: about 3 operations per step, so roughly 1,000+ tasks/day |
+| Cloudflare D1 Free | 5M rows read/day, 100k rows written/day, 5 GB | Yes |
+| GitHub Actions | Unlimited for public repos; 2,000 minutes/month for private repos on GitHub Free | Yes: about 1–2 minutes per demo job, so roughly 1,000 jobs/month if the repo is private |
+| Telegram Bot API | Free | Yes |
+
+**Not available at $0:**
+- Unlimited model use
+- Confidential processing without Google using the data
+- Premium video or image generation (Google's docs list Gemini Omni Flash and Genie 4 as not supported on the free tier)
+- Claude or OpenAI models
+- Large file storage beyond the R2 free allowance (R2 may also require a payment method on file)
+- Any support guarantee: free-tier quotas can change or be reduced at Google's discretion
+
+## J. Troubleshooting
 
 Send `/diag` to the bot. It reports whether each secret is set (never its value), checks D1, asks Anthropic whether the key is accepted and `AI_MODEL` is available, and checks that the GitHub token can read the workflow.
 

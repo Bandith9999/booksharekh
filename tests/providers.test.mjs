@@ -13,7 +13,7 @@ import { PLAN_SCHEMA } from '../src/agents/schemas.js';
 import { wrapUntrusted } from '../src/agents/prompts.js';
 import { PLAN, mockFetch } from './harness.mjs';
 
-const KEYS = { ANTHROPIC_API_KEY: 'sk-ant-SECRET', OPENAI_API_KEY: 'sk-SECRET', GEMINI_API_KEY: 'AIza-SECRET' };
+const KEYS = { AI_PAID_ENABLED: 'true', ANTHROPIC_API_KEY: 'sk-ant-SECRET', OPENAI_API_KEY: 'sk-SECRET', GEMINI_API_KEY: 'AIza-SECRET' };
 const req = (model, over = {}) => ({ agent: 'manager', systemPrompt: 'sys', messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'ok' }, { role: 'user', content: 'plan' }], model, maxOutputTokens: 1000, responseSchema: PLAN_SCHEMA, ...over });
 const ADAPTERS = [
   [anthropicProvider, 'claude-sonnet-5-5'],
@@ -46,7 +46,7 @@ test('invalid model identifiers and missing keys are rejected before any API cal
   for (const [provider, model] of [['anthropic', 'gpt-4o'], ['openai', 'claude-sonnet-5-5'], ['google', 'models/gemini-2.5-flash'], ['anthropic', ''], ['google', 'gemini 2.5']]) {
     assert.throws(() => validateRoute(KEYS, { provider, model }), e => e.kind === 'config', `${provider}:${model}`);
   }
-  assert.throws(() => validateRoute({}, { provider: 'openai', model: 'gpt-5' }), /OPENAI_API_KEY is not set/);
+  assert.throws(() => validateRoute({ AI_PAID_ENABLED: 'true' }, { provider: 'openai', model: 'gpt-5' }), /OPENAI_API_KEY is not set/);
   assert.doesNotThrow(() => validateRoute(KEYS, { provider: 'google', model: 'gemini-2.5-flash' }));
   assert.equal(calls.length, 0);
 });

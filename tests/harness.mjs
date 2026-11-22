@@ -95,7 +95,8 @@ export function makeEnv(over = {}) {
     AI_PROVIDER: 'mock', ...over,
   };
 }
-export const anthropicEnv = (over = {}) => makeEnv({ AI_PROVIDER: 'anthropic', AI_MODEL: 'claude-sonnet-5-5', ANTHROPIC_API_KEY: 'sk-ant-SECRET-VALUE\n', ...over });
+// Paid adapters are tested with paid AI explicitly unlocked, as an owner would have to do.
+export const anthropicEnv = (over = {}) => makeEnv({ AI_PAID_ENABLED: 'true', AI_PROVIDER: 'anthropic', AI_MODEL: 'claude-sonnet-5-5', ANTHROPIC_API_KEY: 'sk-ant-SECRET-VALUE\n', ...over });
 
 let updateId = 1000;
 export function telegram(env, payload, secret = 'hook-secret') {

@@ -10,17 +10,46 @@ const BLOCKED = new Set(['SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTEN
 function headers(env) {
   return { 'x-goog-api-key': String(env.GEMINI_API_KEY || '').trim(), 'content-type': 'application/json' };
 }
-// Gemini reports an invalid key as HTTP 400 INVALID_ARGUMENT, not 401.
+
+// Gemini error bodies come in two shapes:
+//   new:    { error: { code: 'quota_exceeded' | 'rate_limit_exceeded' | 'too_many_requests', message } }
+//   legacy: { error: { code: 429, status: 'RESOURCE_EXHAUSTED', details: [QuotaFailure{quotaId}, RetryInfo{retryDelay}] } }
 function classify(status, body) {
-  const msg = `${body?.error?.message || ''} ${JSON.stringify(body?.error?.details || '')}`;
-  if (status === 400 && /API[_ ]KEY/i.test(msg)) return 'auth';
+  const e = body?.error || {};
+  const text = `${e.code ?? ''} ${e.status ?? ''} ${e.message ?? ''} ${JSON.stringify(e.details ?? '')}`;
+  if (status === 400 && /API[_ ]KEY/i.test(text)) return 'auth';
+  if (status === 403 && /FREE_TIER_VERIFICATION/i.test(text)) return 'config';
+  if (status === 429) return e.code === 'quota_exceeded' || /PerDay|per day|daily/i.test(text) ? 'quota' : 'rate_limit';
   return kindForStatus(status);
+}
+function retryDelaySeconds(body, response) {
+  const info = (body?.error?.details || []).find(d => String(d?.['@type'] || '').endsWith('RetryInfo'));
+  const s = parseFloat(info?.retryDelay);
+  return Number.isFinite(s) ? Math.min(Math.ceil(s), 3600) : retryAfterSeconds(response);
 }
 function hint(kind) {
   if (kind === 'auth') return 'Key rejected: run `npx wrangler secret put GEMINI_API_KEY` with a valid Google AI Studio key.';
-  if (kind === 'model_not_found') return 'Model not available: check the configured Gemini model.';
-  if (kind === 'rate_limit') return 'Rate limited or quota exhausted: try again later.';
+  if (kind === 'model_not_found') return 'Model not available: check AI_DEFAULT_MODEL / AI_FREE_MODELS.';
+  if (kind === 'quota') return 'Free-tier daily quota used up; Google resets it at midnight Pacific time.';
+  if (kind === 'rate_limit') return 'Free-tier per-minute limit reached; retrying later.';
+  if (kind === 'config') return 'Google requires free-tier verification for this project (FREE_TIER_VERIFICATION_REQUIRED). Complete it in AI Studio; linking billing would move the project to the paid tier.';
   return '';
+}
+
+// OpenAPI-style schema for the older `responseSchema` field: no type arrays (use nullable), upper-case types.
+function toOpenApi(schema) {
+  if (Array.isArray(schema)) return schema.map(toOpenApi);
+  if (!schema || typeof schema !== 'object') return schema;
+  const out = {};
+  for (const [k, v] of Object.entries(schema)) {
+    if (k === 'type') {
+      const types = [].concat(v);
+      out.type = types.find(t => t !== 'null').toUpperCase();
+      if (types.includes('null')) out.nullable = true;
+    } else if (k === 'properties') out.properties = Object.fromEntries(Object.entries(v).map(([p, s]) => [p, toOpenApi(s)]));
+    else out[k] = typeof v === 'object' ? toOpenApi(v) : v;
+  }
+  return out;
 }
 
 export const geminiProvider = {
@@ -31,12 +60,18 @@ export const geminiProvider = {
   async generate(env, req) {
     const generationConfig = { maxOutputTokens: req.maxOutputTokens ?? 2000 };
     if (req.temperature != null) generationConfig.temperature = req.temperature;
+    let system = req.systemPrompt;
     if (req.responseSchema) {
       generationConfig.responseMimeType = 'application/json';
-      generationConfig.responseJsonSchema = toProviderSchema(req.responseSchema, { dropAdditionalProperties: true });
+      // GEMINI_SCHEMA_MODE: json_schema (default) | openapi | prompt. The output is validated locally in every mode.
+      const mode = env.GEMINI_SCHEMA_MODE || 'json_schema';
+      const plain = toProviderSchema(req.responseSchema, { dropAdditionalProperties: true });
+      if (mode === 'openapi') generationConfig.responseSchema = toOpenApi(plain);
+      else if (mode === 'prompt') system += `\n\nRespond with only one JSON object that matches this JSON Schema:\n${JSON.stringify(plain)}`;
+      else generationConfig.responseJsonSchema = plain;
     }
     const body = {
-      systemInstruction: { parts: [{ text: req.systemPrompt }] },
+      systemInstruction: { parts: [{ text: system }] },
       contents: req.messages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
       generationConfig,
     };
@@ -45,7 +80,7 @@ export const geminiProvider = {
     if (!response.ok) {
       const kind = classify(response.status, res);
       throw new AIError(`gemini API HTTP ${response.status}: ${clamp(errorDetail(res), 150)}. ${hint(kind)}`.trim(),
-        { kind, status: response.status, provider: 'google', retryAfter: retryAfterSeconds(response) });
+        { kind, status: response.status, provider: 'google', retryAfter: retryDelaySeconds(res, response) });
     }
     const meta = res?.usageMetadata || {};
     const usage = { inputTokens: meta.promptTokenCount ?? 0, outputTokens: (meta.candidatesTokenCount ?? 0) + (meta.thoughtsTokenCount ?? 0) };
@@ -62,6 +97,7 @@ export const geminiProvider = {
     });
   },
 
+  // Free: reads model metadata, no generation.
   async checkModel(env, model) {
     const { response, body } = await fetchJson('google', `${API}/models/${encodeURIComponent(model)}`, { headers: headers(env) }, 10000);
     const kind = response.ok ? null : classify(response.status, body);

@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS agent_tasks (
   agent TEXT NOT NULL REFERENCES agents(name),
   action TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN
-    ('pending', 'awaiting_approval', 'queued', 'running', 'qa_review', 'revision_required',
+    ('pending', 'awaiting_approval', 'queued', 'running', 'paused', 'qa_review', 'revision_required',
      'completed', 'failed', 'cancelled', 'rejected')),
   input TEXT,
   output TEXT,

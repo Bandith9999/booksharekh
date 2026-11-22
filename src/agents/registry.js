@@ -34,7 +34,7 @@ const LIST = [
     name: 'manager', title: 'BookShareKH Manager', tier: 'default',
     description: 'Understands requests, plans, routes work to specialists, asks for approvals and reports results.',
     allowedTools: [], limitations: ['Plans only; cannot execute, publish or approve anything.'],
-    maxAttempts: 3, allowFallback: true, maxOutputTokens: 2000, outputSchema: PLAN_SCHEMA,
+    maxAttempts: 3, allowFallback: true, maxOutputTokens: 3000, outputSchema: PLAN_SCHEMA,
     actions: { plan: planAction },
   },
   {
@@ -46,7 +46,7 @@ const LIST = [
     actions: { demo_report_job: demoJob('text report') },
   },
   {
-    name: 'book_editor', title: 'EPUB/PDF Editor', tier: 'review', phase: 5,
+    name: 'book_editor', title: 'EPUB/PDF Editor', tier: 'review', phase: 5, confidential: true,
     description: 'Validates and repairs authorized EPUB/PDF files and reports quality issues.',
     allowedTools: ['epub_validate', 'pdf_inspect'],
     limitations: ['Only files with verified rights.', 'Never removes notices, attribution or DRM.'],
@@ -67,7 +67,7 @@ const LIST = [
     actions: { demo_video_job: demoJob('8-second sample-card video') },
   },
   {
-    name: 'laravel_developer', title: 'Laravel Developer', tier: 'code', phase: 6,
+    name: 'laravel_developer', title: 'Laravel Developer', tier: 'code', phase: 6, confidential: true,
     description: 'Prepares Laravel changes, migrations and tests as pull requests.',
     allowedTools: ['github_pull_request'],
     limitations: ['Never deploys or touches the production database.', 'Human review required.'],

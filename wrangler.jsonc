@@ -34,23 +34,32 @@
 		"GITHUB_OWNER": "Bandith9999",
 		"GITHUB_REPO": "booksharekh",
 
-		// Model routing by tier. Unset tiers use "default". Agents pick a tier in src/agents/registry.js;
-		// override one agent from Telegram with /agent <name> set provider=... model=...
-		// Providers: anthropic | openai | google | mock. Keys are Cloudflare secrets, never vars.
-		"AI_DEFAULT_PROVIDER": "anthropic",
-		"AI_DEFAULT_MODEL": "claude-sonnet-5-5",
-		"AI_FAST_PROVIDER": "anthropic",
-		"AI_FAST_MODEL": "claude-haiku-5-5",
-		"AI_REVIEW_PROVIDER": "anthropic",
-		"AI_REVIEW_MODEL": "claude-sonnet-5-5",
+		// $0 mode: every agent uses the default tier, Gemini on Google's free API tier.
+		// The other tiers (AI_FAST_*, AI_REVIEW_*, AI_CODE_*) are unset, so they inherit the default.
+		// Override one agent from Telegram with /agent <name> set provider=google model=<free model>.
+		// Keys are Cloudflare secrets, never vars: GEMINI_API_KEY (from a Google project WITHOUT billing).
+		"AI_DEFAULT_PROVIDER": "google",
+		"AI_DEFAULT_MODEL": "gemini-3.8-flash",
 
-		// Runtime provider fallback is off. If enabled, it is used only for rate limits, outages and
-		// timeouts, never for refusals, auth errors or budget limits, and only by agents that allow it.
+		// Paid AI lock. While "false", only these free Gemini models (and the mock provider) can run;
+		// Anthropic, OpenAI and non-free Gemini models are refused. Only the owner should change this.
+		"AI_PAID_ENABLED": "false",
+		"AI_FREE_MODELS": "gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash-lite",
+		// json_schema (default) | openapi | prompt. Switch if Gemini rejects the schema field; output is
+		// validated in the Worker in every mode.
+		"GEMINI_SCHEMA_MODE": "json_schema",
+
+		// Runtime provider fallback is off (and a paid fallback is refused while paid AI is locked).
 		"AI_FALLBACK_ENABLED": "false",
 
-		"TASK_TOKEN_BUDGET": "60000",
-		"DAILY_TOKEN_BUDGET": "500000",
-		"APPROVAL_TTL_HOURS": "24",
-		"TASK_RATE_LIMIT_PER_HOUR": "20"
+		// Free-tier limits. Keep them BELOW the RPM/RPD shown for your project in AI Studio
+		// (https://aistudio.google.com/rate-limit). Daily limits pause tasks; per-minute limits retry later.
+		"AI_MAX_REQUESTS_PER_MINUTE": "5",
+		"AI_MAX_REQUESTS_PER_DAY": "100",
+		"DAILY_TASK_LIMIT": "20",
+		"TASK_RATE_LIMIT_PER_HOUR": "10",
+		"TASK_TOKEN_BUDGET": "30000",
+		"DAILY_TOKEN_BUDGET": "300000",
+		"APPROVAL_TTL_HOURS": "24"
 	}
 }

@@ -151,7 +151,7 @@ test('budgets cap output tokens and stop AI calls when exhausted', async () => {
   await telegram(env2, msg('/task write a report'));
   await drain(env2);
   assert.equal(anthropicCalls(calls2), 0);
-  assert.equal(latestTask(env2).status, 'plan_failed');
+  assert.equal(latestTask(env2).status, 'paused', 'daily limits pause instead of failing');
   assert.match(latestTask(env2).result_note, /Daily token budget reached \(900\/1000\)/);
 });
 

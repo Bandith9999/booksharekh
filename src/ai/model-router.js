@@ -34,11 +34,30 @@ export function validateModelId(provider, model) {
   return p;
 }
 
+// ---- Free-tier guard ----
+// Paid AI stays locked until the owner sets AI_PAID_ENABLED=true in wrangler.jsonc and redeploys.
+// While locked, only the mock provider and Gemini models on the AI_FREE_MODELS allowlist may run.
+export const DEFAULT_FREE_MODELS = 'gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash-lite';
+export const paidEnabled = env => env.AI_PAID_ENABLED === 'true';
+export const freeModels = env => String(env.AI_FREE_MODELS || DEFAULT_FREE_MODELS).split(',').map(s => s.trim()).filter(Boolean);
+export const isFreeRoute = (env, route) => route.provider === 'mock' || (route.provider === 'google' && freeModels(env).includes(route.model));
+
 // Throws a config AIError if the route cannot be used. Never prints key values.
 export function validateRoute(env, route) {
   const p = validateModelId(route.provider, route.model);
+  if (!paidEnabled(env) && !isFreeRoute(env, route)) {
+    throw new AIError(`${route.provider}/${route.model} is not a free-tier model and paid AI is locked. Only the owner can unlock it: set AI_PAID_ENABLED=true in wrangler.jsonc and redeploy.`, { kind: 'config' });
+  }
   if (p.keyName && !env[p.keyName]) throw new AIError(`${p.keyName} is not set (needed for ${p.name}/${route.model})`, { kind: 'config' });
   return p;
+}
+
+// Google may use free-tier (unpaid) Gemini prompts and responses to improve its products, and human
+// reviewers may read them. Agents that handle confidential material must not use it by default.
+export function checkDataPolicy(env, agentDef, route) {
+  if (!agentDef.confidential || route.provider !== 'google' || env.GEMINI_PAID_TIER === 'true') return;
+  if (env.AI_ALLOW_CONFIDENTIAL_ON_FREE_TIER === 'true') return;
+  throw new AIError(`${agentDef.name} handles confidential content, and free-tier Gemini prompts may be used by Google to improve its products (human reviewers may read them). Use a paid Gemini project (GEMINI_PAID_TIER=true) or another paid provider.`, { kind: 'config' });
 }
 
 // Explicit opt-in: AI_FALLBACK_ENABLED=true plus AI_FALLBACK_PROVIDER/MODEL, and the agent must allow it.

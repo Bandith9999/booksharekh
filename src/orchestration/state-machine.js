@@ -4,13 +4,15 @@
 
 // Owner-facing tasks (`tasks`). 'pending', 'dispatching' and 'dispatch_failed' are Phase 1 states kept
 // so existing rows stay valid: 'pending' means awaiting approval.
+// 'paused' = a daily AI quota or budget ran out; the owner resumes with /resume (never auto-switched to paid AI).
 export const TASK = {
-  planning: ['awaiting_approval', 'queued', 'plan_failed', 'failed', 'cancelled'],
+  planning: ['awaiting_approval', 'queued', 'paused', 'plan_failed', 'failed', 'cancelled'],
   pending: ['queued', 'rejected', 'cancelled'],
   awaiting_approval: ['queued', 'rejected', 'cancelled', 'failed'],
-  queued: ['running', 'completed', 'failed', 'cancelled'],
+  queued: ['running', 'paused', 'completed', 'failed', 'cancelled'],
   dispatching: ['queued', 'running', 'dispatch_failed', 'completed', 'failed'],
-  running: ['qa_review', 'awaiting_approval', 'completed', 'failed', 'revision_required'],
+  running: ['qa_review', 'awaiting_approval', 'paused', 'completed', 'failed', 'revision_required'],
+  paused: ['planning', 'queued', 'running', 'cancelled', 'failed'],
   qa_review: ['completed', 'revision_required', 'awaiting_approval', 'failed'],
   revision_required: ['planning', 'queued', 'cancelled', 'failed'],
   completed: [], failed: [], cancelled: [], rejected: [], plan_failed: [], dispatch_failed: [],
@@ -21,7 +23,8 @@ export const AGENT_TASK = {
   pending: ['queued', 'awaiting_approval', 'cancelled', 'failed'],
   awaiting_approval: ['queued', 'rejected', 'cancelled', 'failed'],
   queued: ['running', 'cancelled', 'failed'],
-  running: ['queued', 'completed', 'failed', 'qa_review', 'cancelled'],
+  running: ['queued', 'completed', 'failed', 'qa_review', 'cancelled', 'paused'],
+  paused: ['queued', 'cancelled', 'failed'],
   qa_review: ['completed', 'revision_required', 'failed'],
   revision_required: ['queued', 'cancelled', 'failed'],
   completed: [], failed: [], cancelled: [], rejected: [],

@@ -1,6 +1,6 @@
 // Runs one AI action for one agent step: route → budget → provider call → log → (opt-in) fallback.
 import { AIError, AVAILABILITY_KINDS } from '../ai/errors.js';
-import { fallbackRoute, resolveRoute, sameRoute, validateRoute } from '../ai/model-router.js';
+import { checkDataPolicy, fallbackRoute, resolveRoute, sameRoute, validateRoute } from '../ai/model-router.js';
 import { getProvider } from '../ai/provider-factory.js';
 import { audit, getAgentOverride } from '../db.js';
 import { checkBudget, logExecution } from '../orchestration/budget.js';
@@ -26,6 +26,7 @@ export async function runAIAction(env, { task, agentTask, action }) {
   if (override && override.enabled === 0) throw new AIError(`Agent ${def.name} is disabled (/agent ${def.name} set enabled=on)`, { kind: 'config' });
   const route = resolveRoute(env, def, override);
   validateRoute(env, route);
+  checkDataPolicy(env, def, route);
 
   const built = await action.buildRequest(env, { task, agentTask, def });
   const { remaining } = await checkBudget(env, task.id);
@@ -38,7 +39,14 @@ export async function runAIAction(env, { task, agentTask, action }) {
     const fb = fallbackRoute(env, def);
     // Fallback only for availability problems; never for refusals, auth, bad requests or budget.
     if (!fb || !(e instanceof AIError) || !AVAILABILITY_KINDS.has(e.kind) || sameRoute(fb, route)) throw e;
-    validateRoute(env, fb);
+    try {
+      validateRoute(env, fb); // a paid fallback is refused while paid AI is locked
+      checkDataPolicy(env, def, fb);
+    } catch (blocked) {
+      // A disallowed fallback means "no fallback": keep the original (retryable) error.
+      await audit(env, task.id, 'FALLBACK_BLOCKED', 'system', `${def.name}: ${fb.provider}/${fb.model}: ${blocked.message}`);
+      throw e;
+    }
     await checkBudget(env, task.id);
     await audit(env, task.id, 'PROVIDER_FALLBACK', 'system', `${def.name}: ${route.provider}/${route.model} → ${fb.provider}/${fb.model} after ${e.kind}`);
     return attempt(env, ctx, fb, req);

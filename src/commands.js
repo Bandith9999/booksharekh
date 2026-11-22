@@ -3,9 +3,9 @@ import { clamp, isOwner, parseCommand, parseMemory, parseTaskRef, githubHint } f
 import { audit, findTask, getAgentOverride, listAgentTasks } from './db.js';
 import { reply, tg } from './telegram.js';
 import { AGENTS, TOOLS, isImplemented, validateRegistry } from './agents/registry.js';
-import { fallbackRoute, resolveRoute, validateRoute } from './ai/model-router.js';
+import { fallbackRoute, freeModels, paidEnabled, resolveRoute, validateRoute } from './ai/model-router.js';
 import { PROVIDER_NAMES, getProvider, normalizeProvider } from './ai/provider-factory.js';
-import { approveStep, cancelTask, createTask, legacyDecision, rejectStep } from './orchestration/engine.js';
+import { approveStep, cancelTask, createTask, legacyDecision, rejectStep, resumeTask } from './orchestration/engine.js';
 import { budgets, tokensUsed } from './orchestration/budget.js';
 import { WORKFLOW_FILE, githubHeaders, workflowUrl } from './orchestration/github.js';
 
@@ -14,6 +14,7 @@ const HELP = `BookShareKH Manager
 /taskstatus <task-id> — steps, approvals, tokens, GitHub run
 /approve <task-id> · /reject <task-id> — decide a waiting task
 /cancel <task-id> — cancel a task that has not started on GitHub
+/resume <task-id> — continue a task paused by a daily AI quota
 /status — recent tasks · /pending — tasks waiting for approval
 /agents — the AI team · /agent <name> — details and settings
 /remember key=value · /memory — saved settings
@@ -107,6 +108,9 @@ async function taskStatusText(env, task) {
   return lines.join('\n');
 }
 
+const SECRET_HINT = /(pass(word|wd)?|secret|api[_-]?key|token|credential|cpanel|sk-ant-|sk-[a-z0-9]{16,}|AIza[0-9A-Za-z_-]{20,}|ghp_|github_pat_)/i;
+const looksSecret = (key, value) => SECRET_HINT.test(key) || SECRET_HINT.test(value);
+
 export async function diagnostics(env) {
   const lines = ['BookShareKH diagnostics (secret values are never shown)'];
   for (const name of ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_WEBHOOK_SECRET', 'JOB_CALLBACK_SECRET', 'GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY'])
@@ -134,7 +138,10 @@ export async function diagnostics(env) {
       lines.push(c.ok ? `✅ ${label}: key accepted, model available` : `❌ ${label}: HTTP ${c.status} ${c.detail}${c.hint ? `\n   → ${c.hint}` : ''}`);
     } catch (e) { lines.push(`❌ ${label}: ${e.message}`); }
   }
-  lines.push(`Budgets: ${budgets(env).task} tokens/task, ${budgets(env).daily} tokens/day · fallback ${env.AI_FALLBACK_ENABLED === 'true' ? 'enabled' : 'off'}`);
+  const b = budgets(env);
+  lines.push(paidEnabled(env) ? '⚠️ Paid AI UNLOCKED (AI_PAID_ENABLED=true)' : `🔒 Paid AI locked · free models: ${freeModels(env).join(', ')}`);
+  if (env.GEMINI_API_KEY && env.GEMINI_PAID_TIER !== 'true') lines.push('ℹ️ Gemini free tier: Google may use prompts to improve its products and reviewers may read them. Do not send confidential data.');
+  lines.push(`Limits: ${b.perMinute} AI calls/min, ${b.perDay} AI calls/day, ${b.task} tokens/task, ${b.daily} tokens/day, ${Number(env.DAILY_TASK_LIMIT) || 50} tasks/day · fallback ${env.AI_FALLBACK_ENABLED === 'true' ? 'enabled' : 'off'}`);
 
   if (env.GITHUB_TOKEN && env.GITHUB_OWNER && env.GITHUB_REPO) {
     try {
@@ -187,10 +194,12 @@ export async function handleMessage(env, m) {
     case 'remember': {
       const parsed = parseMemory(text);
       if (!parsed) return reply(env, chat, 'Use: /remember video.language=Khmer');
+      if (looksSecret(parsed.key, parsed.value)) return reply(env, chat, 'Not saved: this looks like a password, key or token. Saved settings are sent to the AI provider with every plan, so never store credentials here.');
       await env.DB.prepare(`INSERT INTO memories (key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP)
         ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP`).bind(parsed.key, parsed.value).run();
       await audit(env, null, 'MEMORY_UPDATED', user, parsed.key);
-      return reply(env, chat, `Saved: ${parsed.key} = ${parsed.value}`);
+      return reply(env, chat, `Saved: ${parsed.key} = ${parsed.value}
+(Saved settings are included in AI prompts; on the free Gemini tier Google may use them to improve its products.)`);
     }
     case 'memory': {
       const rows = await env.DB.prepare('SELECT key,value FROM memories ORDER BY updated_at DESC LIMIT 30').all();
@@ -204,7 +213,7 @@ export async function handleMessage(env, m) {
     case 'task': {
       if (!c.args) return reply(env, chat, 'Use: /task Make a short promotional video for an authorized sample book');
       const r = await createTask(env, { userId: user, description: c.args });
-      if (r.rateLimited) return reply(env, chat, `Limit reached: at most ${r.limit} tasks per hour. Try again later.`);
+      if (r.rateLimited) return reply(env, chat, `Limit reached: at most ${r.limit} tasks per ${r.period}. Try again later.`);
       if (r.failed) return;
       return reply(env, chat, `📝 Task ${r.id} received (type ${r.type}). Planning now; the plan and approval buttons will follow.`);
     }
@@ -219,6 +228,12 @@ export async function handleMessage(env, m) {
     case 'cancel': {
       const task = await resolveTask(env, chat, c.args, '/cancel <task-id>');
       return task && reply(env, chat, cancelText(task.id, await cancelTask(env, task.id, user)));
+    }
+    case 'resume': {
+      const task = await resolveTask(env, chat, c.args, '/resume <task-id>');
+      if (!task) return;
+      const r = await resumeTask(env, task.id, user);
+      return reply(env, chat, r.ok ? `Resumed ${task.id}. If the quota is still used up it will pause again; nothing switches to paid AI.` : r.reason === 'not_found' ? 'Task not found.' : `Cannot resume: task is ${r.reason.replace('status ', '')}.`);
     }
     case 'agents': return reply(env, chat, await agentsText(env));
     case 'agent': {
