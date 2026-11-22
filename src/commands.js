@@ -16,24 +16,7 @@ import { WebsiteApiError, apiConfigured, apiHealth, formatBooks, latestBooks, se
 import { decideTopup, pendingTopups, sendTopupAlert } from './website/topups.js';
 import { usersSummary } from './website/users.js';
 import { sendSamples } from './samples.js';
-
-const HELP = `BookShareKH Manager
-/task <request> — plan a task (approval needed before anything runs)
-/develop <change> — website code change: the Laravel Developer opens a pull request (approval first; never deploys)
-/website — live site health and security check
-/deploy — put merged website code live (approval first)
-/books [latest N | search <title>] — books from the website API
-/research <title> — find a public-domain copy (Project Gutenberg) and prepare a draft
-/requests — pending book requests from visitors
-/topups — pending top-ups · /users — user numbers · /preview — sample of every alert
-/status — recent tasks (waiting ones first) · /taskstatus <task-id> — details
-/cancel <task-id> — cancel a task that has not started on GitHub
-/resume <task-id> — continue a task paused by a daily AI quota
-/agents — the AI team · /agent <name> — details and settings
-/remember key=value · /memory — saved settings
-/diag — check AI providers, GitHub, queue and database
-
-Every change to your website, books or code waits for your Approve tap. Nothing goes live on booksharekh.com without it.`;
+import { DEPARTMENTS, DEPT_BY_KEY, TAP_COMMANDS, registerMenu, sendDepartment, sendHelp } from './departments.js';
 
 const short = id => `${id.slice(0, 17)}…`;
 
@@ -46,15 +29,21 @@ function routeLabel(env, def, override) {
   } catch (e) { return `⚠️ ${e.message}`; }
 }
 
+// AI staff grouped by department (Finance and HR have no AI: you decide).
 async function agentsText(env) {
-  const lines = ['BookShareKH AI team'];
-  for (const a of Object.values(AGENTS)) {
-    const ov = await getAgentOverride(env, a.name);
-    const state = ov?.enabled === 0 ? '⏸ disabled' : isImplemented(a.name) ? `✅ ${Object.keys(a.actions).join(', ')}` : `🕓 planned (Phase ${a.phase})`;
-    lines.push(`\n${a.title} — ${a.name}\n   ${state}\n   ${routeLabel(env, a, ov)}`);
+  const lines = ['🏢 BookShareKH AI staff'];
+  for (const d of DEPARTMENTS) {
+    lines.push(`\n${d.icon} ${d.name} — /${d.key}`);
+    if (!d.agents.length) { lines.push('   (no AI — you decide)'); continue; }
+    for (const name of d.agents) {
+      const a = AGENTS[name], ov = await getAgentOverride(env, a.name);
+      const state = ov?.enabled === 0 ? '⏸ disabled' : isImplemented(a.name) ? '✅ active' : `🕓 planned (Phase ${a.phase})`;
+      lines.push(`• ${a.title} (${a.name}) ${state}\n   ${routeLabel(env, a, ov)}`);
+    }
   }
   return lines.join('\n');
 }
+const agentTitles = () => Object.fromEntries(Object.values(AGENTS).map(a => [a.name, a.title]));
 
 async function agentText(env, a) {
   const ov = await getAgentOverride(env, a.name);
@@ -215,7 +204,11 @@ export async function handleMessage(env, m) {
   const c = parseCommand(text);
   if (!c) return reply(env, chat, T.unknown(env));
   switch (c.cmd) {
-    case 'start': case 'help': return reply(env, chat, tr(T.help(env), HELP));
+    case 'start': case 'help': case 'menu':
+      await registerMenu(env).catch(e => console.error('setMyCommands failed', String(e)));
+      return sendHelp(env, chat);
+    case 'admin': case 'dev': case 'finance': case 'hr': case 'marketing':
+      return sendDepartment(env, chat, c.cmd, agentTitles());
     case 'remember': {
       const parsed = parseMemory(text);
       if (!parsed) return reply(env, chat, 'Use: /remember video.language=Khmer');
@@ -362,6 +355,11 @@ export async function handleCallback(env, q) {
     return reply(env, chat, decisionText(kind, kind === 'approve' ? await approveStep(env, m[2], user) : await rejectStep(env, m[2], user), env));
   }
   if ((m = /^cx:(BSK-[a-f0-9-]{36})$/.exec(data))) return reply(env, chat, cancelText(m[1], await cancelTask(env, m[1], user), env));
+  // Department menu buttons: open a department, or run a command that needs no extra text.
+  if ((m = /^dp:([a-z]+)$/.exec(data))) return m[1] === 'all' ? sendHelp(env, chat) : DEPT_BY_KEY[m[1]] && sendDepartment(env, chat, m[1], agentTitles());
+  if ((m = /^run:([a-z]+)$/.exec(data)) && TAP_COMMANDS.has(m[1])) {
+    return handleMessage(env, { from: q.from, chat: q.message.chat, text: `/${m[1]}` });
+  }
   try {
     if ((m = /^bi:(\d{1,7}):(\d{1,10})$/.exec(data))) return reply(env, chat, await startImport(env, user, Number(m[1]), Number(m[2]) || null));
     if ((m = /^rq:(\d{1,10})$/.exec(data))) {

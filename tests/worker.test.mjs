@@ -171,7 +171,7 @@ test('processing error notifies owner and returns 200 so Telegram stops retrying
   const env = makeEnv();
   let n = 0;
   const calls = mockFetch([[/api\.telegram\.org/, () => (++n === 1 ? new Response('down', { status: 502 }) : Response.json({ ok: true }))]]);
-  const res = await telegram(env, msg('/help'));
+  const res = await telegram(env, msg('/status'));
   assert.equal(res.status, 200);
   assert.match(lastText(calls), /could not be processed/);
 });

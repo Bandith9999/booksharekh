@@ -16,22 +16,6 @@ export const note = (env, kind) => `*** ${pick(env, ...NOTES[kind])} ***`;
 const short = id => `${String(id).slice(0, 17)}…`;
 
 export const T = {
-  help: env => pick(env, null, `🤖 BookShareKH Manager
-/task <សំណើ> — រៀបចំការងារ
-/develop <ការកែ> — កែកូដវេបសាយ (PR)
-/research <ចំណងជើង> — រកសៀវភៅ public domain
-/requests — សំណើសៀវភៅដែលកំពុងរង់ចាំ
-/topups — topup ដែលកំពុងរង់ចាំ
-/users — ចំនួនអ្នកប្រើ
-/preview — មើលគំរូ alert ទាំងអស់
-/books [latest N | search <ចំណងជើង>] — សៀវភៅលើវេបសាយ
-/website — ពិនិត្យវេបសាយ
-/deploy — ដាក់កូដដែលបាន merge ឲ្យដំណើរការលើវេបសាយ
-/status · /taskstatus <id>
-/cancel · /resume <id>
-/agents · /diag · /memory · /remember key=value
-
-រាល់ការផ្លាស់ប្តូរ ត្រូវរង់ចាំការយល់ព្រមពីអ្នក។`),
   unknown: env => pick(env, 'Unknown command. Try /help.', 'មិនស្គាល់ command។ សូមវាយ /help'),
   taskReceived: (env, id, type) => pick(env, `📝 Task ${id} received (type ${type}). Planning now; the plan and approval buttons will follow.`, `📝 បានទទួល ${short(id)} — កំពុងរៀបចំផែនការ…`),
   developReceived: (env, id) => pick(env, `📝 Website task ${id} received. Planning now; then you approve running the Laravel Developer, which opens a pull request. Nothing is deployed.`, `📝 បានទទួល ${short(id)} — កំពុងរៀបចំផែនការកែកូដ…`),
