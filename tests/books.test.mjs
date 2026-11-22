@@ -138,7 +138,7 @@ test('book requests: silent first poll, then alerts; Find → legal search → i
   assert.match(alert.text, /^\*\*\* BOOK REQUEST \*\*\*\n📚 #5 Moby Dick — Herman Melville \(English\)/);
   assert.deepEqual(alert.reply_markup.inline_keyboard[0].map(b => b.callback_data), ['rq:5', 'rr:5']);
   await worker.scheduled({}, env, {});
-  assert.equal(sent(calls).filter(m => /request #5/.test(m.text)).length, 1, 'each request announced once');
+  assert.equal(sent(calls).filter(m => /BOOK REQUEST \*\*\*\n📚 #5 /.test(m.text)).length, 1, 'each request announced once');
 
   await telegram(env, press('rq:5'));
   assert.equal(state.requests[1].status, 'approved');
