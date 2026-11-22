@@ -38,8 +38,8 @@
 		// LARAVEL_API_URL = base URL of the restricted AI API (empty until installed); its token is the
 		// secret LARAVEL_API_TOKEN.
 		"WEBSITE_URL": "https://booksharekh.com",
-		"WEBSITE_REPO": "",
-		"LARAVEL_API_URL": "",
+		"WEBSITE_REPO": "booksharekh-website",
+		"LARAVEL_API_URL": "https://booksharekh.com",
 
 		// Planning AI: Claude Sonnet 5.5 via the Anthropic API (owner decision 2026-11-22, ~ $0.01 per plan).
 		// Key: Cloudflare secret ANTHROPIC_API_KEY. Every tier inherits this default.

@@ -97,7 +97,9 @@ jobs:
           grep -q "Errors parsing" "$RUNNER_TEMP/lint.txt"; LINT=$([ $? -eq 0 ] && echo fail || echo pass)
           if [ -d tests ]; then
             cp -n .env.example .env 2>/dev/null; php artisan key:generate --force >/dev/null 2>&1
-            php artisan test > "$RUNNER_TEMP/tests.txt" 2>&1; TESTS=$([ $? -eq 0 ] && echo pass || echo fail)
+            php artisan test --log-junit "$RUNNER_TEMP/junit.xml" > "$RUNNER_TEMP/tests.txt" 2>&1
+            # Only NEW failures count; tests/known-failures.txt lists failures that predate the AI.
+            php .github/scripts/check-tests.php "$RUNNER_TEMP/junit.xml" >> "$RUNNER_TEMP/tests.txt" 2>&1; TESTS=$([ $? -eq 0 ] && echo pass || echo fail)
           else TESTS=none; fi
           git reset -q -- .env 2>/dev/null
           if git diff --cached | grep -nE '^\+.*(APP_KEY=base64:|DB_PASSWORD=.+|sk-ant-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|ghp_[A-Za-z0-9]{20,}|github_pat_|-----BEGIN [A-Z ]*PRIVATE KEY)'; then

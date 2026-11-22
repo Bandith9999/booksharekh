@@ -30,7 +30,7 @@ jobs:
           if [ -n "$errs" ]; then echo "$errs"; exit 1; fi
       - name: Tests
         run: |
-          if [ -d tests ]; then cp -n .env.example .env; php artisan key:generate --force; php artisan test; else echo "No tests directory yet"; fi
+          if [ -d tests ]; then cp -n .env.example .env; php artisan key:generate --force; php artisan test --log-junit junit.xml || true; php .github/scripts/check-tests.php junit.xml; else echo "No tests directory yet"; fi
       - name: Secret scan (added lines)
         run: |
           BASE=${{ github.event.pull_request.base.sha || 'HEAD~1' }}

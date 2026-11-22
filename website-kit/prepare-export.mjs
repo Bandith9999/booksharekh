@@ -10,13 +10,16 @@ import { join, relative, sep } from 'node:path';
 export const EXCLUDE = [
   /^\.env(\..*)?$/, /^vendor(\/|$)/, /^node_modules(\/|$)/, /^storage\/logs(\/|$)/, /^storage\/framework(\/|$)/,
   /^storage\/app(\/|$)/, /^storage\/debugbar(\/|$)/, /^public\/storage(\/|$)/, /^public\/uploads(\/|$)/, /^bootstrap\/cache\/.*\.php$/,
+  // BookShareKH uploads: book files and covers live under public/images (content, not code).
+  /^public\/images\/(files|covers)(\/|$)/, /^\.phpunit\.result\.cache$/,
   /^\.git(\/|$)/, /(^|\/)(error_log|\.DS_Store)$/, /\.(sql|sql\.gz|sqlite|zip|tar|tgz|gz|bak|log)$/i, /^public\/hot$/,
 ];
 const KEEP_ANYWAY = [/^\.env\.example$/];
 export const SECRET_PATTERNS = [
   [/APP_KEY=base64:[A-Za-z0-9+/=]{20,}/, 'Laravel APP_KEY'],
-  [/(DB_PASSWORD|MAIL_PASSWORD|AWS_SECRET_ACCESS_KEY|GOOGLE_CLIENT_SECRET|PUSHER_APP_SECRET)\s*=\s*['"]?[^\s'"$]{4,}/, 'credential assignment'],
-  [/['"](password|secret|client_secret|api_key)['"]\s*=>\s*['"][^'"$]{6,}['"]/i, 'hard-coded secret in PHP array'],
+  // Placeholders (null, empty, ${VAR}) and Laravel validation rules ('required|...') are not secrets.
+  [/(DB_PASSWORD|MAIL_PASSWORD|AWS_SECRET_ACCESS_KEY|GOOGLE_CLIENT_SECRET|PUSHER_APP_SECRET)\s*=\s*['"]?(?!null\b|\$\{)[^\s'"$]{4,}/, 'credential assignment'],
+  [/['"](password|secret|client_secret|api_key)['"]\s*=>\s*['"](?!(required|nullable|sometimes|confirmed|string|min:|max:|password|secret|test|wrong-password|new-password)\b)[^'"$|]{6,}['"]/i, 'hard-coded secret in PHP array'],
   [/sk-ant-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|GOCSPX-[A-Za-z0-9_-]{10,}/, 'API key/token'],
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, 'private key'],
 ];
@@ -48,6 +51,11 @@ export function prepareExport(src, dest) {
     }
   };
   walk(src);
+  // Laravel needs these (empty) runtime folders to exist; recreate the standard skeleton.
+  for (const d of ['storage/app/public', 'storage/framework/cache/data', 'storage/framework/sessions', 'storage/framework/testing', 'storage/framework/views', 'storage/logs']) {
+    mkdirSync(join(dest, d), { recursive: true });
+    writeFileSync(join(dest, d, '.gitignore'), d === 'storage/app/public' ? '*\n!.gitignore\n' : '*\n!.gitignore\n');
+  }
   // .env.example with key names only (values are never copied).
   if (!existsSync(join(dest, '.env.example')) && existsSync(join(src, '.env'))) {
     const keys = readFileSync(join(src, '.env'), 'utf8').split('\n').map(l => l.match(/^\s*([A-Z0-9_]+)\s*=/)?.[1]).filter(Boolean);
