@@ -53,13 +53,13 @@ async function getJob(env, id, request) {
     if (Number(request.headers.get('X-Runner-Version') || 0) < 2) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
     const promo = await promoOf(env, id);
     const voice = /^km-KH-[A-Za-z]+Neural$/.test(env.PROMO_VOICE || '') ? env.PROMO_VOICE : 'km-KH-SreymomNeural';
-    return json({ ...job, videos: (promo?.videos || []).slice(0, 1).map(v => ({ scenes: v.scenes, covers: v.covers || [], voice })) });
+    return json({ ...job, videos: (promo?.videos || []).slice(0, 1).map(v => ({ scenes: v.scenes, covers: v.covers || [], voice, background_url: v.background?.url || null, logo_url: v.logo_url || null })) });
   }
   // Poster jobs get the approved poster text; they need the runner with the poster renderer (v3).
   if (job.task_type === 'poster') {
     if (Number(request.headers.get('X-Runner-Version') || 0) < 3) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
     const p = await posterOf(env, id);
-    return json({ ...job, posters: (p?.posters || []).slice(0, 1).map(x => ({ headline: x.headline, subline: x.subline, points: x.points, cta: x.cta, covers: x.covers || [] })) });
+    return json({ ...job, posters: (p?.posters || []).slice(0, 1).map(x => ({ headline: x.headline, subline: x.subline, points: x.points, cta: x.cta, covers: x.covers || [], background_url: x.background?.url || null, logo_url: x.logo_url || null })) });
   }
   return json(job);
 }

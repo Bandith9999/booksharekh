@@ -6,7 +6,7 @@
 import { clamp } from '../helpers.js';
 import { addArtifact, latestArtifact, memoryContext } from '../db.js';
 import { wrapUntrusted } from '../agents/prompts.js';
-import { promoBooks, userActivity } from '../website/laravel-api.js';
+import { promoBooks, siteMedia, userActivity } from '../website/laravel-api.js';
 
 const USED_COVERS = 'promo_used_covers';
 const THEME_INDEX = 'promo_theme_index';
@@ -33,9 +33,10 @@ export const THEMES = [
 ];
 
 export const PROMO_SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['title', 'scenes', 'caption', 'hashtags'],
+  type: 'object', additionalProperties: false, required: ['title', 'background', 'scenes', 'caption', 'hashtags'],
   properties: {
     title: { type: 'string', minLength: 1, maxLength: 60 },
+    background: { type: 'string', minLength: 1, maxLength: 120 },
     scenes: {
       type: 'array', minItems: 3, maxItems: 5,
       items: {
@@ -113,19 +114,34 @@ export async function nextPromoInput(env, indexKey = THEME_INDEX) {
   await setSetting(env, indexKey, i + 1);
   let members = null;
   try { members = Number((await userActivity(env, 24))?.total_users) || null; } catch { /* optional */ }
-  return { theme: THEMES[i], members, covers: await pickCovers(env) };
+  let media = [];
+  try { media = await siteMedia(env); } catch { /* optional: the design works without it */ }
+  return { theme: THEMES[i], members, covers: await pickCovers(env), media };
 }
+
+// ---- Website images (owner request): logo always; the AI picks a background that fits the theme ----
+export const isLogo = m => /(^|\/)logo[^/]*\.(png|jpe?g|webp)$/i.test(m.name);
+export const logoOf = media => (media || []).find(isLogo)?.url || null;
+// What the AI sees: names and sizes only (never URLs it could alter).
+export const mediaForPrompt = media => (media || []).filter(m => !isLogo(m))
+  .map(m => `${m.name}${m.width ? ` (${m.width}x${m.height})` : ''}`).join('\n') || '(none)';
+// The AI's choice must be one of the listed images; anything else means "no background image".
+export function backgroundOf(media, name) {
+  const m = (media || []).find(x => x.name === name && !isLogo(x));
+  return m ? { name: m.name, url: m.url } : null;
+}
+export const MEDIA_RULE = 'Website images (media): pick "background" = the name of ONE listed image that fits the theme (e.g. a library or reading photo), exactly as written, or "none". The BookShareKH logo and book covers are added automatically; never pick a logo, QR code or payment image.';
 
 export const promoAction = {
   kind: 'ai',
   description: 'Write a Khmer video script (on-screen text + voice-over) and caption promoting booksharekh.com',
   async buildRequest(env, { agentTask }) {
-    const { theme, members } = JSON.parse(agentTask.input || '{}');
+    const { theme, members, media } = JSON.parse(agentTask.input || '{}');
     const facts = [...SITE_FACTS, ...(members ? [`BookShareKH has ${members} registered members.`] : [])];
     const notes = await memoryContext(env); // the owner's /remember notes
     return {
-      systemPrompt: `${SYSTEM}\n${HASHTAG_RULE}`, promptVersion: 'promo-site-v3-tags',
-      messages: [{ role: 'user', content: `${wrapUntrusted('saved_settings', notes || '(none)')}\n${wrapUntrusted('facts', facts.join('\n'))}\n${wrapUntrusted('theme', theme)}` }],
+      systemPrompt: `${SYSTEM}\n${HASHTAG_RULE}\n${MEDIA_RULE}`, promptVersion: 'promo-site-v4-media',
+      messages: [{ role: 'user', content: `${wrapUntrusted('saved_settings', notes || '(none)')}\n${wrapUntrusted('facts', facts.join('\n'))}\n${wrapUntrusted('media', mediaForPrompt(media))}\n${wrapUntrusted('theme', theme)}` }],
       responseSchema: PROMO_SCHEMA, effort: 'low', maxOutputTokens: 2000, metadata: { theme },
     };
   },
@@ -139,6 +155,7 @@ export const promoAction = {
       scenes: out.scenes.slice(0, 5).map(s => ({ text: clamp(s.text, 60), voice: clamp(s.voice, 160) })),
       caption: `${clamp(out.caption, 700)}\n\n${tags.join(' ')}`,
       covers: (input.covers || []).map(c => c.cover_url), cover_ids: (input.covers || []).map(c => c.id),
+      background: backgroundOf(input.media, out.background), logo_url: logoOf(input.media),
     };
     const promo = { videos: [video] };
     await addArtifact(env, { taskId: task.id, agentTaskId: agentTask.id, kind: 'promo', content: JSON.stringify(promo) });
@@ -150,7 +167,7 @@ export const promoAction = {
 // What the owner approves: the on-screen text and what the voice will say.
 export function promoPreview(promo) {
   const v = promo.videos[0];
-  return [`🎬 ${v.title}`, ...v.scenes.map((s, i) => `${i + 1}. ${s.text}\n   🔊 ${s.voice}`)].join('\n');
+  return [`🎬 ${v.title}`, ...(v.background ? [`🏞 ${v.background.name.split('/').pop()}`] : []), ...v.scenes.map((s, i) => `${i + 1}. ${s.text}\n   🔊 ${s.voice}`)].join('\n');
 }
 
 export async function promoOf(env, taskId) {

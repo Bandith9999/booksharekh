@@ -50,7 +50,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Scene,Noto Sans Khmer,62,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,3,22,0,8,40,40,110,1
+Style: Scene,Noto Sans Khmer,62,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,3,22,0,8,40,40,140,1
 Style: Brand,Noto Sans Khmer,50,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,2,2,40,40,150,1
 Style: Url,Noto Sans Khmer,42,&H0000D7FF,&H0000D7FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,3,2,2,40,40,92,1
 
@@ -117,28 +117,49 @@ export async function renderPromo(job, outFile, { voice: useVoice = true } = {})
     const f = join(work, `cover${i}.img`);
     if (await downloadCover(url, f)) covers.push(f);
   }
+  // Website images: a background photo chosen by the AI and the logo (both optional).
+  const bgFile = join(work, 'background.img'), logoFile = join(work, 'logo.img');
+  const hasBg = await downloadCover(job.background_url, bgFile);
+  const hasLogo = await downloadCover(job.logo_url, logoFile);
   const inputs = ['-f', 'lavfi', '-t', String(total), '-i', `color=c=0x0f172a:s=${W}x${H}:r=${FPS}`];
+  let n = 1;
+  const bgIdx = hasBg ? n++ : -1;
+  if (hasBg) inputs.push('-loop', '1', '-t', String(total), '-i', bgFile);
+  const coverIdx = covers.map(() => n++);
   for (const c of covers) inputs.push('-loop', '1', '-t', String(total), '-i', c);
+  const logoIdx = hasLogo ? n++ : -1;
+  if (hasLogo) inputs.push('-loop', '1', '-t', String(total), '-i', logoFile);
   const parts = [];
   let base = '[0:v]';
+  // Background: the website photo (lightly blurred, darkened, slow zoom-in) or else the first cover, blurred.
+  if (hasBg) {
+    const BW = Math.round(W * 1.12 / 2) * 2, BH = Math.round(H * 1.12 / 2) * 2; // 12% larger for the slow pan
+    parts.push(`[${bgIdx}:v]scale=${BW}:${BH}:force_original_aspect_ratio=increase,crop=${BW}:${BH},boxblur=4:1,eq=brightness=-0.30:saturation=0.9,` +
+      `crop=${W}:${H}:x='(iw-${W})/2*(1-t/${total.toFixed(2)})':y='(ih-${H})/2',setsar=1[bgc]`);
+  } else if (covers.length) {
+    parts.push(`[${coverIdx[0]}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=30:2,eq=brightness=-0.32:saturation=0.8,setsar=1[bgc]`);
+  }
+  if (hasBg || covers.length) { parts.push(`${base}[bgc]overlay=0:0[b0]`); base = '[b0]'; }
   if (covers.length) {
-    // Background: first cover, blurred and darkened, over the dark base.
-    parts.push(`[1:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=30:2,eq=brightness=-0.32:saturation=0.8,setsar=1[bgc]`);
-    parts.push(`${base}[bgc]overlay=0:0[b0]`);
-    base = '[b0]';
     // Layout: side covers smaller and behind, centre cover in front.
     const slots = covers.length === 1 ? [{ w: 360, x: (W - 360) / 2, y: 480, d: 0.2 }]
       : covers.length === 2 ? [{ w: 280, x: 70, y: 520, d: 0.2 }, { w: 280, x: W - 350, y: 520, d: 0.45 }]
         : [{ w: 240, x: 28, y: 550, d: 0.35 }, { w: 240, x: W - 268, y: 550, d: 0.55 }, { w: 320, x: (W - 320) / 2, y: 490, d: 0.15 }];
     const order = covers.length === 3 ? [1, 2, 0] : covers.map((_, i) => i); // centre slot uses the first cover
     slots.forEach((s, k) => {
-      const inIdx = order[k] + 1;
+      const inIdx = coverIdx[order[k]];
       const h = Math.round(s.w * 1.5);
       parts.push(`[${inIdx}:v]scale=${s.w}:${h}:force_original_aspect_ratio=decrease,pad=${s.w + 8}:${h + 8}:(ow-iw)/2:(oh-ih)/2:color=white,setsar=1[c${k}]`);
       // Slide up from below over 0.6 s, starting at d seconds.
       parts.push(`${base}[c${k}]overlay=x=${Math.round(s.x)}:y='${s.y}+720*max(0\\,1-max(0\\,t-${s.d})/0.6)'[b${k + 1}]`);
       base = `[b${k + 1}]`;
     });
+  }
+  // Logo: small, centred at the top, on a white rounded badge so it reads on any background.
+  if (hasLogo) {
+    parts.push(`[${logoIdx}:v]scale=78:78:force_original_aspect_ratio=decrease,pad=96:96:(ow-iw)/2:(oh-ih)/2:color=white@0.92,format=rgba,setsar=1[logo]`);
+    parts.push(`${base}[logo]overlay=x=(W-w)/2:y=10[bl]`);
+    base = '[bl]';
   }
   const assPath = join(work, 'promo.ass').replace(/\\/g, '/').replace(/^([A-Za-z]):/, '$1\\:');
   const fontsDir = FONTS.replace(/\\/g, '/').replace(/^([A-Za-z]):/, '$1\\:');
@@ -147,7 +168,7 @@ export async function renderPromo(job, outFile, { voice: useVoice = true } = {})
   // Audio: each voice clip padded to its scene length, then concatenated; silence without voice.
   let audioInputs = [], audioMap;
   if (voiced) {
-    const first = 1 + covers.length;
+    const first = n; // audio inputs come after all image inputs
     audio.forEach(f => audioInputs.push('-i', f));
     const pads = scenes.map((s, i) => `[${first + i}:a]aresample=44100,apad=whole_dur=${s.dur.toFixed(3)},atrim=0:${s.dur.toFixed(3)}[a${i}]`);
     parts.push(`anullsrc=r=44100:cl=mono,atrim=0:0.3[a0s]`, ...pads,
@@ -155,12 +176,12 @@ export async function renderPromo(job, outFile, { voice: useVoice = true } = {})
     audioMap = '[aout]';
   } else {
     audioInputs = ['-f', 'lavfi', '-t', String(total), '-i', 'anullsrc=r=44100:cl=stereo'];
-    audioMap = `${1 + covers.length}:a`;
+    audioMap = `${n}:a`;
   }
   run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', ...inputs, ...audioInputs, '-filter_complex', parts.join(';'),
     '-map', '[v]', '-map', audioMap, '-r', String(FPS), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22',
     '-c:a', 'aac', '-b:a', '128k', '-t', total.toFixed(2), '-movflags', '+faststart', outFile]);
-  return { file: outFile, seconds: total, voiced, covers: covers.length, scenes: scenes.map(s => s.lines) };
+  return { file: outFile, seconds: total, voiced, covers: covers.length, background: hasBg, logo: hasLogo, scenes: scenes.map(s => s.lines) };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

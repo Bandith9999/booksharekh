@@ -84,6 +84,22 @@ const listOf = body => (Array.isArray(body?.data) ? body.data : []).slice(0, 20)
 }));
 
 export const apiHealth = env => get(env, '/api/ai/health');
+// Public marketing images on the site (logo, backgrounds, banners; never payment/QR images).
+// Before the website has /api/ai/media, the two images every page uses are offered.
+const KNOWN_MEDIA = ['dist/img/logo/logo.png', 'dist/img/library-bg.jpg'];
+export async function siteMedia(env) {
+  const base = String(env.LARAVEL_API_URL || env.WEBSITE_URL || 'https://booksharekh.com').replace(/\/+$/, '');
+  const host = new URL(base).host;
+  try {
+    const body = await get(env, '/api/ai/media');
+    return (Array.isArray(body?.data) ? body.data : [])
+      .filter(m => { try { const u = new URL(m.url); return u.protocol === 'https:' && u.host === host; } catch { return false; } })
+      .slice(0, 40).map(m => ({ name: clamp(m.name, 120), url: clamp(m.url, 400), width: Number(m.width) || null, height: Number(m.height) || null }));
+  } catch (e) {
+    if (e instanceof WebsiteApiError && e.kind === 'not_installed') return KNOWN_MEDIA.map(name => ({ name, url: `${base}/${name}`, width: null, height: null }));
+    throw e;
+  }
+}
 // Books for promo videos: kind 'popular' (most viewed) or 'latest', with cover, link, views, description.
 export async function promoBooks(env, kind, n = 10) {
   const body = await get(env, '/api/ai/books', { [kind === 'popular' ? 'popular' : 'latest']: n, promo: 1 });

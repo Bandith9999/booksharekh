@@ -20,7 +20,7 @@ assert.ok(lines.length >= 2 && lines.join('').replace(/\s/g, '') === 'យល់�
 // here, so the voiced test uses no covers and the second test uses a public test image.
 const job = {
   voice: 'km-KH-SreymomNeural',
-  covers: [],
+  covers: [], background_url: 'https://booksharekh.com/dist/img/library-bg.jpg', logo_url: 'https://booksharekh.com/dist/img/logo/logo.png',
   scenes: [
     { text: 'ចង់អានសៀវភៅល្អៗ តែមិនដឹងរកនៅឯណា?', voice: 'ចង់អានសៀវភៅល្អៗ តែមិនដឹងរកនៅឯណា?' },
     { text: 'តម្លៃត្រឹមតែ $0.50 ក្នុងមួយក្បាល', voice: 'តម្លៃត្រឹមតែហាសិបសេនក្នុងមួយក្បាល' },
