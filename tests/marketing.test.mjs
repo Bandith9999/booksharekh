@@ -194,9 +194,11 @@ test('/poster: website poster text → approve → PNG file + caption in Telegra
   assert.equal(lastText(calls), '🖼 កំពុងសរសេរអត្ថបទ poster…');
   await drain(e);
   const approval = sent(calls).at(-1);
-  assert.equal(approval.text, '🖼 Poster [DEMO]\n「អានសៀវភៅល្អៗ គ្រប់ពេល」\nសៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ\n✓ តម្លៃ $0.50\n✓ បញ្ចូលលុយតាម KHQR\n[ ចូលមើលឥឡូវនេះ ]\n\n👉 បង្កើត poster?');
+  assert.equal(approval.text, '🖼 Poster [DEMO]\n「អានសៀវភៅល្អៗ គ្រប់ពេល」\nសៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ\n✓ តម្លៃ $0.50\n✓ បញ្ចូលលុយតាម KHQR\n[ ចូលមើលឥឡូវនេះ ]\n\n🔎 QA (mock): ✅ ល្អ\n\n👉 បង្កើត poster?');
   const task = latestTask(e);
   assert.equal(task.task_type, 'poster');
+  const qaStep = e.DB.db.prepare("SELECT agent, status FROM agent_tasks WHERE task_id=? AND action='review_content'").get(task.id);
+  assert.deepEqual({ ...qaStep }, { agent: 'qa_reviewer', status: 'completed' }, 'QA ran before the approval');
   assert.equal(e.DB.db.prepare("SELECT agent FROM agent_tasks WHERE task_id=? AND action='write_poster'").get(task.id).agent, 'content_creator');
 
   await telegram(e, msg('/poster'));
@@ -224,4 +226,31 @@ test('/poster: website poster text → approve → PNG file + caption in Telegra
   assert.match(lastText(calls), /^\[DEMO\][\s\S]*#BookShareKH/);
   await job(e, 'POST', '/job-result', { task_id: task.id, status: 'completed', note: 'Poster sent to Telegram.' });
   assert.equal(lastText(calls), '✅ Poster រួចរាល់ — post លើ Facebook / Instagram');
+});
+
+test('QA by Gemini: issues are shown in the approval; if Gemini is not set up, QA is skipped and the approval still comes', async () => {
+  // Real routing: Claude writes, Gemini reviews. No GEMINI_API_KEY → QA skipped, never blocks.
+  const claudePoster = { title: 'Poster', headline: 'អានសៀវភៅ', subline: 'សៀវភៅច្រើន', points: ['តម្លៃ $0.50', 'KHQR'], cta: 'ចូលមើល', caption: 'x\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#a', '#b'] };
+  const anthropic = [/api\.anthropic\.com\/v1\/messages$/, () => Response.json({ model: 'claude-sonnet-5-5', stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 10 }, content: [{ type: 'text', text: JSON.stringify(claudePoster) }] })];
+  const base = { AI_PAID_ENABLED: 'true', AI_PROVIDER: 'anthropic', AI_MODEL: 'claude-sonnet-5-5', ANTHROPIC_API_KEY: 'sk-ant-x', AI_REVIEW_PROVIDER: 'google', AI_REVIEW_MODEL: 'gemini-3.8-flash' };
+
+  const noKey = env(base);
+  const c1 = mockFetch([tgOk, routes.dispatchOk, promoSite(), anthropic]);
+  await telegram(noKey, msg('/poster'));
+  await drain(noKey);
+  const a1 = sent(c1).at(-1);
+  assert.match(a1.text, /🔎 QA: មិនបានពិនិត្យ \(not set up\)\n\n👉 បង្កើត poster\?$/);
+  assert.ok(a1.reply_markup, 'approval buttons still sent');
+  assert.equal(c1.filter(c => /generativelanguage/.test(c.url)).length, 0);
+
+  const withKey = env({ ...base, GEMINI_API_KEY: 'g-key' });
+  const review = { agent: 'qa_reviewer', task_id: 'x', result: 'requires_changes', issues: ['ពាក្យ "ចូលមើល" គួរថា "ចូលមើលឥឡូវនេះ"'], human_approval_required: true };
+  const c2 = mockFetch([tgOk, routes.dispatchOk, promoSite(), anthropic,
+    [/generativelanguage\.googleapis\.com/, () => Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify(review) }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 5 }, modelVersion: 'gemini-3.8-flash' })]]);
+  await telegram(withKey, msg('/poster'));
+  await drain(withKey);
+  const g = c2.find(c => /generativelanguage/.test(c.url));
+  assert.ok(g, 'Gemini was asked');
+  assert.match(JSON.stringify(g.body), /អានសៀវភៅ/, 'Gemini reviewed the poster text');
+  assert.match(sent(c2).at(-1).text, /🔎 QA \(Gemini\): ⚠️ គួរកែ:\n• ពាក្យ "ចូលមើល" គួរថា "ចូលមើលឥឡូវនេះ"\n\n👉 បង្កើត poster\?$/);
 });

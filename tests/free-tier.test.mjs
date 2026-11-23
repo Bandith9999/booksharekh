@@ -34,12 +34,17 @@ const req = (over = {}) => ({ agent: 'manager', systemPrompt: 'sys', messages: [
 test('live wrangler.jsonc: Claude planning with a capped budget, no fallback, queues intact', () => {
   assert.equal(LIVE.AI_FALLBACK_ENABLED, 'false', 'no automatic provider switching');
   assert.equal(LIVE.AI_PAID_ENABLED, 'true', 'owner unlocked paid AI for Claude');
-  const live = { ...LIVE, ANTHROPIC_API_KEY: 'k' };
+  const live = { ...LIVE, ANTHROPIC_API_KEY: 'k', GEMINI_API_KEY: 'g' };
+  // Claude does the work; the review tier (QA second opinion, book editor) uses Gemini.
   for (const a of Object.values(AGENTS)) {
     const r = resolveRoute(live, a);
-    assert.deepEqual([r.provider, r.model], ['anthropic', 'claude-sonnet-5-5'], a.name);
+    const want = a.tier === 'review' ? ['google', 'gemini-3.8-flash'] : ['anthropic', 'claude-sonnet-5-5'];
+    assert.deepEqual([r.provider, r.model], want, a.name);
     assert.doesNotThrow(() => validateRoute(live, r), a.name);
   }
+  // Confidential agents never run on free-tier Gemini (Google may read those prompts).
+  assert.throws(() => checkDataPolicy(live, AGENTS.book_editor, resolveRoute(live, AGENTS.book_editor)), /confidential/);
+  assert.doesNotThrow(() => checkDataPolicy(live, AGENTS.qa_reviewer, resolveRoute(live, AGENTS.qa_reviewer)));
   // Worst case: every daily token billed at Sonnet 5.5's $10/M output price.
   assert.ok(Number(LIVE.DAILY_TOKEN_BUDGET) * 10 / 1e6 <= 1.0, 'daily cap is at most about $1');
   assert.ok(Number(LIVE.AI_MAX_REQUESTS_PER_DAY) > 0 && Number(LIVE.TASK_TOKEN_BUDGET) <= Number(LIVE.DAILY_TOKEN_BUDGET));

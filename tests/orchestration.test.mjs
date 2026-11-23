@@ -250,7 +250,7 @@ test('/agents and /agent settings are validated, stored and audited', async () =
   const env = anthropicEnv();
   const calls = mockFetch([routes.telegram]);
   await telegram(env, msg('/agents'));
-  assert.match(lastText(calls), /👑 Administrator[\s\S]*QA Reviewer[^\n]*planned \(Phase 3\)\n   anthropic\/claude-sonnet-5-5[\s\S]*💰 Finance — \/finance\n   \(no AI — you decide\)[\s\S]*📣 Marketing[\s\S]*Book Researcher/);
+  assert.match(lastText(calls), /👑 Administrator[\s\S]*QA Reviewer \(qa_reviewer\) ✅ active\n   anthropic\/claude-sonnet-5-5 \(tier review\)[\s\S]*💰 Finance — \/finance\n   \(no AI — you decide\)[\s\S]*📣 Marketing[\s\S]*Book Researcher/);
   await telegram(env, msg('/agent book_researcher set provider=google model=gemini-2.5-flash'));
   assert.match(lastText(calls), /Not saved: GEMINI_API_KEY is not set/);
   await telegram(env, msg('/agent book_researcher set provider=anthropic model=gpt-4o'));

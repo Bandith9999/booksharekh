@@ -53,6 +53,9 @@
 		// AI_PAID_ENABLED=false, plus the secret GEMINI_API_KEY.
 		"AI_DEFAULT_PROVIDER": "anthropic",
 		"AI_DEFAULT_MODEL": "claude-sonnet-5-5",
+		// QA Reviewer (second opinion on marketing text): Gemini, secret GEMINI_API_KEY. Never gets private code.
+		"AI_REVIEW_PROVIDER": "google",
+		"AI_REVIEW_MODEL": "gemini-3.8-flash",
 
 		// Paid AI lock. "true" = unlocked by the owner for Claude. When "false", only the free Gemini models
 		// below (and mock) can run. Only the owner should change this.

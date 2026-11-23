@@ -5,6 +5,7 @@ import { backoffSeconds, clamp, classifyTask } from '../helpers.js';
 import { audit, getAgentOverride, getAgentTask, getTask, listAgentTasks, listDependencies, newId } from '../db.js';
 import { DEMO_JOB_STEP, getAction, getAgent } from '../agents/registry.js';
 import { runAIAction } from '../agents/runner.js';
+import { appendQa, qaSkippedLine } from '../agents/qa.js';
 import { keyboards, notifyTaskOwner } from '../telegram.js';
 import { KM_ACTION, T, isKhmer } from '../i18n.js';
 import { decide, requestApproval, revokeOpenApprovals } from './approvals.js';
@@ -107,7 +108,9 @@ async function createMediaTask(env, { userId, input, type }) {
   await env.DB.prepare('INSERT INTO tasks (id,telegram_user_id,request_text,task_type,proposal,status) VALUES (?,?,?,?,?,?)')
     .bind(id, String(userId), clamp(`${m.label} for booksharekh.com — theme: ${input.theme}`, 2000), type, '(writing)', 'planning').run();
   const writeId = await insertStep(env, { taskId: id, agent: m.agent, action: m.write, status: 'queued', input });
-  await insertStep(env, { taskId: id, agent: m.agent, action: m.job, status: 'pending', dependsOn: [writeId] });
+  // Second opinion (QA Reviewer, Gemini by default) before the owner's approval; optional, never blocks.
+  const qaId = await insertStep(env, { taskId: id, agent: 'qa_reviewer', action: 'review_content', status: 'pending', dependsOn: [writeId] });
+  await insertStep(env, { taskId: id, agent: m.agent, action: m.job, status: 'pending', dependsOn: [qaId] });
   await audit(env, id, 'TASK_CREATED', userId, `${type} theme="${clamp(input.theme, 80)}" covers=${(input.covers || []).map(c => c.id).join(',')}`);
   try {
     await enqueueStep(env, writeId);
@@ -220,8 +223,19 @@ export async function runAgentTask(env, agentTaskId) {
     }
     return { ok: true };
   } catch (e) {
+    // Optional steps (QA second opinion) are skipped on any error instead of failing or pausing the task.
+    if (getAction(at.agent, at.action)?.optional) return skipOptionalStep(env, task, at, e);
     return handleStepError(env, task, at, e);
   }
+}
+
+async function skipOptionalStep(env, task, at, e) {
+  const reason = e?.kind === 'quota' ? 'quota' : e?.kind === 'config' ? 'not set up' : clamp(e?.message || 'error', 60);
+  if (!await transition(env.DB, 'agent_tasks', at.id, 'completed', { from: ['running'], set: { output: JSON.stringify({ skipped: reason }), error: clamp(e?.message, 300), finished_at: SQL_NOW } })) return { skipped: true };
+  await appendQa(env, task.id, qaSkippedLine(reason));
+  await audit(env, task.id, 'STEP_SKIPPED', 'worker', `${at.agent}.${at.action}: ${clamp(e?.message, 150)}`);
+  await advance(env, task.id);
+  return { ok: true, skipped: true };
 }
 
 async function handleStepError(env, task, at, e) {
