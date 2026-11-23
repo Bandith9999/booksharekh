@@ -30,13 +30,20 @@ function promoScripts({ theme = '' }) {
   };
 }
 
+// Content Creator poster text (demo).
+const posterText = () => ({
+  title: 'Poster [DEMO]', headline: 'អានសៀវភៅល្អៗ គ្រប់ពេល', subline: 'សៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ',
+  points: ['តម្លៃ $0.50', 'បញ្ចូលលុយតាម KHQR'], cta: 'ចូលមើលឥឡូវនេះ',
+  caption: '[DEMO] អានសៀវភៅលើ BookShareKH\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#សៀវភៅ', '#Reading'],
+});
+
 export const mockProvider = {
   name: 'mock',
   keyName: null,
   modelPattern: /^mock$/,
 
   async generate(env, req) {
-    const responders = { manager: () => managerPlan(req.metadata || {}), video_creator: () => promoScripts(req.metadata || {}) };
+    const responders = { manager: () => managerPlan(req.metadata || {}), video_creator: () => promoScripts(req.metadata || {}), content_creator: () => posterText() };
     if (!responders[req.agent]) throw new AIError(`mock provider has no responder for agent ${req.agent}`, { kind: 'config', provider: 'mock' });
     const content = JSON.stringify(responders[req.agent]());
     return makeResponse({

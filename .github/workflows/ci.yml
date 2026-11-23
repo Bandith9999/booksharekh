@@ -28,6 +28,7 @@ jobs:
       - name: Install Khmer voice-over (same as the job workflow)
         run: python3 -m pip install --user edge-tts==7.3.1
       - run: node scripts/test_promo_render.mjs
+      - run: node scripts/test_poster_render.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

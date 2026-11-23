@@ -4,6 +4,7 @@ import { clamp, safeTaskId } from './helpers.js';
 import { addArtifact, audit } from './db.js';
 import { reply, tgForm } from './telegram.js';
 import { markPromoted, promoOf } from './marketing/promo.js';
+import { posterOf } from './marketing/poster.js';
 import { T } from './i18n.js';
 import { advance } from './orchestration/engine.js';
 import { deployShaOf, prReviewText } from './orchestration/github.js';
@@ -54,40 +55,51 @@ async function getJob(env, id, request) {
     const voice = /^km-KH-[A-Za-z]+Neural$/.test(env.PROMO_VOICE || '') ? env.PROMO_VOICE : 'km-KH-SreymomNeural';
     return json({ ...job, videos: (promo?.videos || []).slice(0, 1).map(v => ({ scenes: v.scenes, covers: v.covers || [], voice })) });
   }
+  // Poster jobs get the approved poster text; they need the runner with the poster renderer (v3).
+  if (job.task_type === 'poster') {
+    if (Number(request.headers.get('X-Runner-Version') || 0) < 3) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
+    const p = await posterOf(env, id);
+    return json({ ...job, posters: (p?.posters || []).slice(0, 1).map(x => ({ headline: x.headline, subline: x.subline, points: x.points, cta: x.cta, covers: x.covers || [] })) });
+  }
   return json(job);
 }
 
-// The promo job uploads each finished video; the Worker forwards it to the owner with its caption.
-const MAX_VIDEO_BYTES = 48 * 1024 * 1024; // Telegram bot upload limit is 50 MB
-async function receiveVideo(request, env, taskId, index) {
+// Media jobs upload the finished file; the Worker forwards it to the owner with its caption.
+// book_promo: MP4 video (sendVideo). poster: PNG sent as a file (sendDocument) so it keeps full quality.
+const MEDIA_OUT = {
+  book_promo: { max: 48 * 1024 * 1024, mime: 'video/mp4', method: 'sendVideo', field: 'video', name: 'booksharekh-promo.mp4',
+    item: async (env, id, i) => (await promoOf(env, id))?.videos?.[i], heading: (env, v, req) => T.promoVideo(env, v, new URL(req.url).searchParams.get('voiced') === '0' ? false : undefined) },
+  poster: { max: 10 * 1024 * 1024, mime: 'image/png', method: 'sendDocument', field: 'document', name: 'booksharekh-poster.png',
+    item: async (env, id, i) => (await posterOf(env, id))?.posters?.[i], heading: (env, p) => T.posterImage(env, p) },
+};
+async function receiveMedia(request, env, taskId, index, type) {
+  const out = MEDIA_OUT[type];
   const task = await env.DB.prepare("SELECT id,telegram_user_id,task_type,status FROM tasks WHERE id=?").bind(taskId).first();
-  if (!task || task.task_type !== 'book_promo' || task.status !== 'running') return json({ error: 'not a running promo task' }, 409);
-  const promo = await promoOf(env, taskId);
-  const v = promo?.videos?.[index];
-  if (!v) return json({ error: 'bad video index' }, 400);
-  const size = Number(request.headers.get('content-length') || 0);
-  if (size > MAX_VIDEO_BYTES) return json({ error: 'video too large' }, 413);
+  if (!task || task.task_type !== type || task.status !== 'running') return json({ error: 'not a running task of this kind' }, 409);
+  const v = await out.item(env, taskId, index);
+  if (!v) return json({ error: 'bad index' }, 400);
+  if (Number(request.headers.get('content-length') || 0) > out.max) return json({ error: 'file too large' }, 413);
   const bytes = await request.arrayBuffer();
-  if (!bytes.byteLength || bytes.byteLength > MAX_VIDEO_BYTES) return json({ error: 'empty or too large' }, 413);
-  // Each video is sent once, even if the runner retries the upload.
-  const claimed = await env.DB.prepare("INSERT OR IGNORE INTO settings (key,value,updated_at) VALUES (?, 'sent', CURRENT_TIMESTAMP)").bind(`promo_sent:${taskId}:${index}`).run();
+  if (!bytes.byteLength || bytes.byteLength > out.max) return json({ error: 'empty or too large' }, 413);
+  // Each file is sent once, even if the runner retries the upload.
+  const key = `promo_sent:${taskId}:${index}`;
+  const claimed = await env.DB.prepare("INSERT OR IGNORE INTO settings (key,value,updated_at) VALUES (?, 'sent', CURRENT_TIMESTAMP)").bind(key).run();
   if (claimed.meta?.changes !== 1) return json({ ok: true, duplicate: true });
   const chat = Number(task.telegram_user_id);
   const form = new FormData();
   form.set('chat_id', String(chat));
-  const voiced = new URL(request.url).searchParams.get('voiced');
-  form.set('caption', clamp(T.promoVideo(env, v, voiced === '0' ? false : undefined), 1000));
-  form.set('supports_streaming', 'true');
-  form.set('video', new Blob([bytes], { type: 'video/mp4' }), 'booksharekh-promo.mp4');
+  form.set('caption', clamp(out.heading(env, v, request), 1000));
+  if (type === 'book_promo') form.set('supports_streaming', 'true');
+  form.set(out.field, new Blob([bytes], { type: out.mime }), out.name);
   try {
-    await tgForm(env, 'sendVideo', form);
-    await reply(env, chat, v.caption); // caption alone: easy to copy into TikTok / Facebook
+    await tgForm(env, out.method, form);
+    await reply(env, chat, v.caption); // caption alone: easy to copy into TikTok / Facebook / Instagram
   } catch (e) {
-    await env.DB.prepare('DELETE FROM settings WHERE key=?').bind(`promo_sent:${taskId}:${index}`).run();
+    await env.DB.prepare('DELETE FROM settings WHERE key=?').bind(key).run();
     throw e;
   }
   await markPromoted(env, v.cover_ids || []);
-  await audit(env, taskId, 'PROMO_VIDEO_SENT', 'github-actions', `${clamp(v.title, 80)} ${bytes.byteLength} bytes voiced=${voiced ?? '?'}`);
+  await audit(env, taskId, type === 'poster' ? 'POSTER_SENT' : 'PROMO_VIDEO_SENT', 'github-actions', `${clamp(v.title, 80)} ${bytes.byteLength} bytes`);
   return json({ ok: true });
 }
 async function finishJob(request, env) {
@@ -134,12 +146,13 @@ async function finishJob(request, env) {
     await reply(env, Number(row.telegram_user_id), T.deployDone(env, state === 'completed', clamp(data.note, 300), url));
     return json({ ok: true });
   }
-  if (row.task_type === 'book_promo') {
-    // Report success only if videos really arrived (an outdated runner on main would send none).
+  if (MEDIA_OUT[row.task_type]) {
+    // Report success only if the file really arrived (an outdated runner on main would send none).
     const got = await env.DB.prepare("SELECT COUNT(*) n FROM settings WHERE key LIKE ?").bind(`promo_sent:${data.task_id}:%`).first();
     const ok = state === 'completed' && got.n > 0;
-    await reply(env, Number(row.telegram_user_id), T.promoDone(env, ok, ok ? '' : state === 'completed'
-      ? 'no video was received: the GitHub job on main is out of date (merge the latest code into main)' : clamp(data.note, 300)));
+    const done = row.task_type === 'poster' ? T.posterDone : T.promoDone;
+    await reply(env, Number(row.telegram_user_id), done(env, ok, ok ? '' : state === 'completed'
+      ? 'nothing was received: the GitHub job on main is out of date (merge the latest code into main)' : clamp(data.note, 300)));
     return json({ ok: true });
   }
   await reply(env, Number(row.telegram_user_id), T.jobDone(env, data.task_id, state, clamp(data.note, 300), url, row.task_type !== 'website_code_change', prUrl));
@@ -152,10 +165,10 @@ export default {
     try {
       if (request.method === 'GET' && u.pathname === '/health') return json({ ok: true, service: 'booksharekh-ai-manager' });
       if (request.method === 'POST' && u.pathname === '/telegram') return await telegramWebhook(request, env);
-      const vm = /^\/job-video\/([^/]+)\/(\d)$/.exec(u.pathname);
+      const vm = /^\/job-(video|image)\/([^/]+)\/(\d)$/.exec(u.pathname);
       if (vm && request.method === 'POST') {
         if (!authorizedJob(request, env)) return json({ error: 'unauthorized' }, 401);
-        return safeTaskId(vm[1]) ? await receiveVideo(request, env, vm[1], Number(vm[2])) : json({ error: 'bad id' }, 400);
+        return safeTaskId(vm[2]) ? await receiveMedia(request, env, vm[2], Number(vm[3]), vm[1] === 'image' ? 'poster' : 'book_promo') : json({ error: 'bad id' }, 400);
       }
       if (u.pathname.startsWith('/job/') && request.method === 'GET') {
         if (!authorizedJob(request, env)) return json({ error: 'unauthorized' }, 401);

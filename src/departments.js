@@ -18,8 +18,9 @@ export const DEPARTMENTS = [
       ['resume', '<id>', 'Continue a paused task', 'បន្តការងារដែលបានផ្អាក'],
       ['agents', '', 'AI staff by department', 'បុគ្គលិក AI តាមផ្នែក', true],
       ['diag', '', 'System check', 'ពិនិត្យប្រព័ន្ធ', true],
-      ['memory', '', 'Saved settings', 'Settings ដែលបានរក្សា', true],
-      ['remember', 'key=value', 'Save a setting', 'រក្សា setting'],
+      ['memory', '', 'What the AI remembers', 'អ្វីដែល AI ចាំ', true],
+      ['remember', 'name=text', 'Tell the AI to remember (used by /task, /develop, /promo)', 'ឲ្យ AI ចាំ (ប្រើក្នុង /task /develop /promo)'],
+      ['forget', '<name>', 'Delete a saved note', 'លុបអ្វីដែល AI ចាំ'],
       ['preview', '', 'Sample of every alert', 'គំរូ alert ទាំងអស់', true],
       ['recommend', '', 'Popular books the site lacks (auto every 3 days)', 'សៀវភៅពេញនិយមដែលវេបសាយមិនទាន់មាន (auto រៀងរាល់ 3 ថ្ងៃ)', true],
     ] },
@@ -44,6 +45,7 @@ export const DEPARTMENTS = [
     agents: ['book_researcher', 'book_editor', 'content_creator', 'video_creator'],
     commands: [
       ['promo', '', '1 video about booksharekh.com, Khmer voice + caption', 'វីដេអូ 1 អំពី booksharekh.com មានសំឡេង + caption ខ្មែរ', true],
+      ['poster', '', '1 poster in the website style + caption (Facebook / Instagram)', 'Poster 1 តាមស្ទីលវេបសាយ + caption (Facebook / Instagram)', true],
       ['requests', '', 'Book requests from visitors', 'សំណើសៀវភៅពីអ្នកទស្សនា', true],
       ['books', '', 'Latest books on the site', 'សៀវភៅថ្មីៗលើវេបសាយ', true],
       ['research', '<title>', 'Find a public-domain book', 'រកសៀវភៅ public domain'],
@@ -87,7 +89,7 @@ export const sendDepartment = (env, chat, key, titles) => {
 };
 
 // Telegram's "/" menu: department commands first, then the rest. Shown only in the owner's chat.
-const MENU_VERSION = '4';
+const MENU_VERSION = '6';
 export async function registerMenu(env) {
   const done = await env.DB.prepare("SELECT value FROM settings WHERE key='bot_menu_version'").first().catch(() => null);
   if (done?.value === `${MENU_VERSION}:${env.BOT_LANGUAGE || 'en'}`) return false;

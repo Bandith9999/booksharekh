@@ -39,7 +39,7 @@ test('first check is silent; then one short message with new members and the tot
   s.state.total = 1234;
   await worker.scheduled({}, e, {});
   assert.equal(s.state.asked[1].since, '2026-11-22 10:00:01', 'continues from the site time it returned');
-  assert.equal(lastText(calls), '*** សមាជិកថ្មី ***\n🆕 dara@example.com · dara\n🆕 nita\n\n👥 សរុប 1,234 នាក់');
+  assert.equal(lastText(calls), '👥 HR · *** សមាជិកថ្មី ***\n🆕 dara@example.com · dara\n🆕 nita\n\n👥 សរុប 1,234 នាក់');
 
   const before = sent(calls).length;
   await worker.scheduled({}, e, {});
@@ -58,7 +58,7 @@ test('logins alone send no alert; many new members are capped to 10 lines', asyn
   assert.ok(!sent(calls).some(m => /Login|🔑/.test(m.text)));
   s.state.activity = { registered: Array.from({ length: 13 }, (_, i) => ({ user: `u${i}` })), logins: [{ user: 'niza' }] };
   await worker.scheduled({}, e, {});
-  assert.equal(lastText(calls), `*** NEW MEMBER ***\n${Array.from({ length: 10 }, (_, i) => `🆕 u${i}`).join('\n')}\n+3\n\n👥 Total users: 1,200`);
+  assert.equal(lastText(calls), `👥 HR · *** NEW MEMBER ***\n${Array.from({ length: 10 }, (_, i) => `🆕 u${i}`).join('\n')}\n+3\n\n👥 Total users: 1,200`);
 });
 
 test('/users shows the total and the last 24 hours', async () => {
@@ -78,8 +78,8 @@ test('/preview sends a sample of every alert with inert buttons, owner only', as
   const msgs = sent(calls);
   assert.equal(msgs.length, 13, 'intro + 12 samples');
   assert.match(msgs[0].text, /^🧪 Preview: 12 sample alerts/);
-  assert.match(msgs[1].text, /^\*\*\* បញ្ចូលប្រាក់ \*\*\*/);
-  assert.match(msgs[5].text, /^\*\*\* សមាជិកថ្មី \*\*\*\n🆕 lyly@example\.com · Lyly\.Hong/);
+  assert.match(msgs[1].text, /^💰 Finance · \*\*\* បញ្ចូលប្រាក់ \*\*\*/);
+  assert.match(msgs[5].text, /^👥 HR · \*\*\* សមាជិកថ្មី \*\*\*\n🆕 lyly@example\.com · Lyly\.Hong/);
   const buttons = msgs.flatMap(m => m.reply_markup?.inline_keyboard.flat() ?? []);
   assert.ok(buttons.length >= 7 && buttons.every(b => b.callback_data === 'noop'), 'sample buttons do nothing');
   assert.equal(calls.filter(c => !/api\.telegram\.org/.test(c.url)).length, 0, 'no website or GitHub calls');
@@ -102,7 +102,7 @@ test('book purchases: silent alert with buyer email, user name and book title; f
   rows.push({ id: 8, email: 'reader1@example.com', user: 'reader1', book_title: 'Emma' }, { id: 9, email: null, user: 'reader2', book_title: 'Dracula' });
   await worker.scheduled({}, e, {});
   const m = sent(calls).at(-1);
-  assert.equal(m.text, '*** ទិញសៀវភៅ ***\n🛒 reader1@example.com · reader1\n📖 Emma\n\n🛒 reader2\n📖 Dracula');
+  assert.equal(m.text, '💰 Finance · *** ទិញសៀវភៅ ***\n🛒 reader1@example.com · reader1\n📖 Emma\n\n🛒 reader2\n📖 Dracula');
   assert.equal(m.disable_notification, true, 'silent');
   const before = sent(calls).length;
   await worker.scheduled({}, e, {});

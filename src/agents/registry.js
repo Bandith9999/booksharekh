@@ -4,6 +4,7 @@
 import { TIERS } from '../ai/model-router.js';
 import { planAction } from './manager.js';
 import { promoAction } from '../marketing/promo.js';
+import { posterAction } from '../marketing/poster.js';
 import { PROMPTS } from './prompts.js';
 import { AGENT_NAMES, PLAN_SCHEMA, QA_SCHEMA, RESEARCH_SCHEMA } from './schemas.js';
 
@@ -19,6 +20,7 @@ export const TOOLS = {
   pdf_inspect: { description: 'Inspect PDF structure with pypdf / PyMuPDF', implemented: false, phase: 5 },
   ffmpeg_render: { description: 'Render vertical video with FFmpeg in GitHub Actions', implemented: false, phase: 5 },
   website_deploy: { description: 'Deploy an approved commit to booksharekh.com over SSH (changed files, backup, health check, rollback)', implemented: true },
+  poster_render: { description: 'Render a 1080x1350 poster in the website style (HTML + headless Chrome) in GitHub Actions and send it to the owner; never posts', implemented: true },
   promo_video: { description: 'Render 9:16 promo videos (book cover + Khmer text) in GitHub Actions and send them to the owner in Telegram; never posts', implemented: true },
   github_pull_request: { description: 'Run the Laravel Developer job on the private website repo: branch, edit, test, open a pull request', implemented: true },
 };
@@ -72,8 +74,17 @@ const LIST = [
   {
     name: 'content_creator', title: 'Content Creator', tier: 'fast', phase: 4,
     description: 'Writes Khmer and English descriptions, SEO metadata, captions and scripts as drafts.',
-    allowedTools: [], limitations: ['Drafts only; publication needs owner approval.', 'No invented quotes or facts.'],
-    maxAttempts: 3, allowFallback: true, maxOutputTokens: 3000, outputSchema: null, actions: {},
+    allowedTools: ['poster_render'], limitations: ['Drafts only; publication needs owner approval.', 'No invented quotes or facts.', 'Never posts: posters go to the owner in Telegram.'],
+    maxAttempts: 3, allowFallback: true, maxOutputTokens: 3000, outputSchema: null,
+    actions: {
+      // /poster: Khmer poster text (AI), then the owner approves rendering in the website's style.
+      write_poster: posterAction,
+      poster_job: {
+        kind: 'github_job', tool: 'poster_render', workflow: 'demo', requiresApproval: true, approvalAction: 'create_poster',
+        description: 'Render the poster in GitHub Actions and send it with its caption to you in Telegram. Nothing is posted.',
+        descriptionKm: 'បង្កើត poster ហើយផ្ញើមកអ្នកក្នុង Telegram។ មិន post ទេ។',
+      },
+    },
   },
   {
     name: 'video_creator', title: 'Video Creator', tier: 'fast', phase: 5,

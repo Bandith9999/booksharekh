@@ -43,6 +43,22 @@ def render_promo(i, v):
     info=json.loads(res.stdout.strip().splitlines()[-1])
     return mp4, bool(info.get('voiced'))
 
+def render_poster(i, p):
+    job_file=out/('poster%d.json'%i)
+    job_file.write_text(json.dumps(p,ensure_ascii=False),encoding='utf-8')
+    png=out/('poster%d.png'%i)
+    res=subprocess.run(['node',str(pathlib.Path(__file__).parent/'poster_render.mjs'),str(job_file),str(png)],
+        capture_output=True,text=True,timeout=300)
+    print(res.stdout[-2000:], res.stderr[-2000:])
+    if res.returncode!=0: raise RuntimeError('poster render failed: '+res.stderr[-250:])
+    return png
+
+def upload_image(i, path):
+    req=urllib.request.Request(root+'/job-image/'+task_id+'/'+str(i),data=path.read_bytes(),method='POST',
+        headers={'Authorization':'Bearer '+secret,'Content-Type':'image/png','User-Agent':'BookShareKH-GitHub-Runner/1.0'})
+    with urllib.request.urlopen(req,timeout=120) as res:
+        return json.loads(res.read())
+
 def upload_video(i, path, voiced=True):
     req=urllib.request.Request(root+'/job-video/'+task_id+'/'+str(i)+'?voiced='+('1' if voiced else '0'),data=path.read_bytes(),method='POST',
         headers={'Authorization':'Bearer '+secret,'Content-Type':'video/mp4','User-Agent':'BookShareKH-GitHub-Runner/1.0'})
@@ -53,12 +69,18 @@ def api(path, payload=None):
     data=json.dumps(payload).encode() if payload is not None else None
     # Cloudflare blocks the default "Python-urllib" user agent (error 1010), so always send our own.
     # X-Runner-Version: the Worker only hands promo jobs to a runner that has the current renderer.
-    req=urllib.request.Request(root+path,data=data,headers={'Authorization':'Bearer '+secret, 'Content-Type':'application/json','User-Agent':'BookShareKH-GitHub-Runner/1.0','X-Runner-Version':'2'})
+    req=urllib.request.Request(root+path,data=data,headers={'Authorization':'Bearer '+secret, 'Content-Type':'application/json','User-Agent':'BookShareKH-GitHub-Runner/1.0','X-Runner-Version':'3'})
     with urllib.request.urlopen(req,timeout=25) as res:
         return json.loads(res.read())
 
 def run_job():
     job=api('/job/'+task_id)
+    if job['task_type']=='poster':
+        posters=(job.get('posters') or [])[:1]
+        if not posters: raise RuntimeError('No approved poster in this task')
+        upload_image(0, render_poster(0, posters[0]))
+        api('/job-result',{'task_id':task_id,'status':'completed','run_url':url,'note':'Poster sent to Telegram.'})
+        return
     if job['task_type']=='book_promo':
         videos=(job.get('videos') or [])[:1]
         if not videos: raise RuntimeError('No approved promo video in this task')

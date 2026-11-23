@@ -91,15 +91,24 @@ export async function createDeployTask(env, { userId, sha, preview }) {
 
 // /promo: one video about the website. The Video Creator writes the Khmer script (AI step), then the
 // owner approves rendering (GitHub Actions). The video and caption come back in Telegram; nothing is posted.
-export async function createPromoTask(env, { userId, input }) {
+// Marketing media: 'book_promo' (Video Creator) and 'poster' (Content Creator). Same shape: an AI step
+// writes the text, then the owner approves rendering in GitHub Actions.
+const MEDIA = {
+  book_promo: { agent: 'video_creator', write: 'write_promo', job: 'promo_video_job', label: 'Promo video' },
+  poster: { agent: 'content_creator', write: 'write_poster', job: 'poster_job', label: 'Poster' },
+};
+export const createPromoTask = (env, args) => createMediaTask(env, { ...args, type: 'book_promo' });
+export const createPosterTask = (env, args) => createMediaTask(env, { ...args, type: 'poster' });
+async function createMediaTask(env, { userId, input, type }) {
+  const m = MEDIA[type];
   const limited = await rateLimited(env, userId);
   if (limited) return limited;
   const id = newId('BSK');
   await env.DB.prepare('INSERT INTO tasks (id,telegram_user_id,request_text,task_type,proposal,status) VALUES (?,?,?,?,?,?)')
-    .bind(id, String(userId), clamp(`Promo video for booksharekh.com — theme: ${input.theme}`, 2000), 'book_promo', '(writing script)', 'planning').run();
-  const writeId = await insertStep(env, { taskId: id, agent: 'video_creator', action: 'write_promo', status: 'queued', input });
-  await insertStep(env, { taskId: id, agent: 'video_creator', action: 'promo_video_job', status: 'pending', dependsOn: [writeId] });
-  await audit(env, id, 'TASK_CREATED', userId, `book_promo theme="${clamp(input.theme, 80)}" covers=${(input.covers || []).map(c => c.id).join(',')}`);
+    .bind(id, String(userId), clamp(`${m.label} for booksharekh.com — theme: ${input.theme}`, 2000), type, '(writing)', 'planning').run();
+  const writeId = await insertStep(env, { taskId: id, agent: m.agent, action: m.write, status: 'queued', input });
+  await insertStep(env, { taskId: id, agent: m.agent, action: m.job, status: 'pending', dependsOn: [writeId] });
+  await audit(env, id, 'TASK_CREATED', userId, `${type} theme="${clamp(input.theme, 80)}" covers=${(input.covers || []).map(c => c.id).join(',')}`);
   try {
     await enqueueStep(env, writeId);
   } catch (e) {

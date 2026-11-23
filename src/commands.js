@@ -5,7 +5,7 @@ import { reply, tg } from './telegram.js';
 import { AGENTS, TOOLS, isImplemented, validateRegistry } from './agents/registry.js';
 import { fallbackRoute, freeModels, paidEnabled, resolveRoute, validateRoute } from './ai/model-router.js';
 import { PROVIDER_NAMES, getProvider, normalizeProvider } from './ai/provider-factory.js';
-import { approveStep, cancelTask, createBookImport, createDeployTask, createPromoTask, createTask, rejectStep, resumeTask } from './orchestration/engine.js';
+import { approveStep, cancelTask, createBookImport, createDeployTask, createPosterTask, createPromoTask, createTask, rejectStep, resumeTask } from './orchestration/engine.js';
 import { SourceDownError, getCandidate, searchPublicDomain } from './books/gutenberg.js';
 import { T, tr } from './i18n.js';
 import { candidatesMessage, findForRequest, recentPendingRequests, rejectRequest, requestKeyboard } from './books/requests.js';
@@ -17,6 +17,7 @@ import { decideTopup, pendingTopups, sendTopupAlert } from './website/topups.js'
 import { usersSummary } from './website/users.js';
 import { sendSamples } from './samples.js';
 import { nextPromoInput } from './marketing/promo.js';
+import { nextPosterInput } from './marketing/poster.js';
 import { sendRecommendations } from './marketing/recommend.js';
 import { DEPARTMENTS, DEPT_BY_KEY, TAP_COMMANDS, registerMenu, sendDepartment, sendHelp } from './departments.js';
 
@@ -225,6 +226,14 @@ export async function handleMessage(env, m) {
       const rows = await env.DB.prepare('SELECT key,value FROM memories ORDER BY updated_at DESC LIMIT 30').all();
       return reply(env, chat, rows.results?.length ? rows.results.map(x => `${x.key} = ${x.value}`).join('\n') : 'No memory saved.');
     }
+    case 'forget': {
+      const key = c.args.trim();
+      if (!/^[a-zA-Z0-9_.-]{1,80}$/.test(key)) return reply(env, chat, T.forgetUsage(env));
+      const r = await env.DB.prepare('DELETE FROM memories WHERE key=?').bind(key).run();
+      if (r.meta?.changes !== 1) return reply(env, chat, T.forgetMissing(env, key));
+      await audit(env, null, 'MEMORY_DELETED', user, key);
+      return reply(env, chat, T.forgotten(env, key));
+    }
     case 'status': { // one list: tasks waiting for you first (⏳), then the most recent
       const rows = await env.DB.prepare(`SELECT id,status,task_type,created_at FROM tasks
         ORDER BY (status='awaiting_approval') DESC, created_at DESC LIMIT 10`).all();
@@ -296,16 +305,19 @@ export async function handleMessage(env, m) {
       }
     }
     case 'preview': return sendSamples(env, chat);
-    case 'promo': {
+    case 'promo': case 'poster': {
+      // One at a time per kind, about the website (book covers are only visuals).
+      const kind = c.cmd === 'poster'
+        ? { type: 'poster', busy: T.posterBusy, started: T.posterStarted, input: nextPosterInput, create: createPosterTask }
+        : { type: 'book_promo', busy: T.promoBusy, started: T.promoStarted, input: nextPromoInput, create: createPromoTask };
       try {
-        // One video at a time, about the website (covers are only visuals).
-        const busy = await env.DB.prepare(`SELECT id FROM tasks WHERE task_type='book_promo'
-            AND status IN ('planning','queued','awaiting_approval','dispatching','running') AND created_at > datetime('now','-2 hours') LIMIT 1`).first();
-        if (busy) return reply(env, chat, T.promoBusy(env));
-        const r = await createPromoTask(env, { userId: user, input: await nextPromoInput(env) });
+        const busy = await env.DB.prepare(`SELECT id FROM tasks WHERE task_type=?
+            AND status IN ('planning','queued','awaiting_approval','dispatching','running') AND created_at > datetime('now','-2 hours') LIMIT 1`).bind(kind.type).first();
+        if (busy) return reply(env, chat, kind.busy(env));
+        const r = await kind.create(env, { userId: user, input: await kind.input(env) });
         if (r.rateLimited) return reply(env, chat, T.rateLimited(env, r.limit, r.period));
         if (r.failed) return;
-        return reply(env, chat, T.promoStarted(env));
+        return reply(env, chat, kind.started(env));
       } catch (e) {
         if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
         throw e;

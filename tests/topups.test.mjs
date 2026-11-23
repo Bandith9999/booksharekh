@@ -46,7 +46,7 @@ test('new manual top-up -> receipt photo with amount, transaction and Approve/Re
   await worker.scheduled({}, e, {});
   const [p] = photos(calls);
   assert.equal(p.chat_id, String(OWNER));
-  assert.equal(p.caption, '*** បញ្ចូលប្រាក់ ***\n💰 Top-up #2\n👤 dara\n💵 10.00 USD · KHQR\n🧾 TX2\n📝 ABA\n\n👉 បញ្ចូលលុយ?');
+  assert.equal(p.caption, '💰 Finance · *** បញ្ចូលប្រាក់ ***\n💰 Top-up #2\n👤 dara\n💵 10.00 USD · KHQR\n🧾 TX2\n📝 ABA\n\n👉 បញ្ចូលលុយ?');
   assert.ok(p.photo instanceof Blob);
   assert.deepEqual(JSON.parse(p.reply_markup).inline_keyboard[0].map(b => b.callback_data), ['ta:2', 'tr:2']);
   assert.equal(photos(calls).length, 1, 'Bakong auto-verified QR top-up is not sent to the owner');
