@@ -130,7 +130,11 @@ async function finishJob(request, env) {
     return json({ ok: true });
   }
   if (row.task_type === 'book_promo') {
-    await reply(env, Number(row.telegram_user_id), T.promoDone(env, state === 'completed', clamp(data.note, 300)));
+    // Report success only if videos really arrived (an outdated runner on main would send none).
+    const got = await env.DB.prepare("SELECT COUNT(*) n FROM settings WHERE key LIKE ?").bind(`promo_sent:${data.task_id}:%`).first();
+    const ok = state === 'completed' && got.n > 0;
+    await reply(env, Number(row.telegram_user_id), T.promoDone(env, ok, ok ? '' : state === 'completed'
+      ? 'no video was received: the GitHub job on main is out of date (merge the latest code into main)' : clamp(data.note, 300)));
     return json({ ok: true });
   }
   await reply(env, Number(row.telegram_user_id), T.jobDone(env, data.task_id, state, clamp(data.note, 300), url, row.task_type !== 'website_code_change', prUrl));

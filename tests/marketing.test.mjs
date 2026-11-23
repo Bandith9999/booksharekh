@@ -64,6 +64,17 @@ test('/promo: 1 popular + 1 new book → Khmer captions → approve → videos a
   assert.match(sent(calls).at(-1).text, /^🎬 វីដេអូ 1\n\n1\. 🔥 ពេញនិយម Dracula/);
 });
 
+test('a promo job that reports "completed" without sending any video is reported as a failure', async () => {
+  const e = env();
+  const calls = mockFetch([tgOk, routes.dispatchOk, promoSite()]);
+  await telegram(e, msg('/promo'));
+  await drain(e);
+  await telegram(e, press(approveButton(calls)));
+  await drain(e);
+  await job(e, 'POST', '/job-result', { task_id: latestTask(e).id, status: 'completed', note: 'Demo artifacts generated.' });
+  assert.match(lastText(calls), /^❌ បង្កើតវីដេអូមិនបាន: no video was received/);
+});
+
 test('video uploads are refused unless the promo task is running', async () => {
   const e = env();
   mockFetch([tgOk, routes.dispatchOk, promoSite()]);
