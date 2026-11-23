@@ -13,6 +13,7 @@ const NOTES = {
   member: ['hr', 'NEW MEMBER', 'សមាជិកថ្មី'],
   request: ['marketing', 'BOOK REQUEST', 'សំណើសៀវភៅ'],
   promo: ['marketing', 'PROMO VIDEO', 'វីដេអូផ្សព្វផ្សាយ'],
+  poster: ['marketing', 'POSTER', 'Poster ផ្សព្វផ្សាយ'],
   recommend: ['admin', 'BOOK IDEAS', 'ណែនាំសៀវភៅ'],
 };
 export const note = (env, kind) => { const [dept, en, km] = NOTES[kind]; return `${DEPT[dept]} · *** ${pick(env, en, km)} ***`; };
@@ -117,6 +118,11 @@ ${url}` : ''}`),
   recommend: (env, lines) => [note(env, 'recommend'),
     pick(env, '📈 Popular books the website does not have yet:', '📈 សៀវភៅពេញនិយម ដែលវេបសាយមិនទាន់មាន:'), ...lines].join('\n'),
   recommendNone: env => pick(env, 'No new book ideas this time: the sources are down or the site already has them.', 'គ្មានសៀវភៅថ្មីសម្រាប់ណែនាំលើកនេះ'),
+  posterImage: (env, p) => `${note(env, 'poster')}\n🖼 ${p.title}\n` + pick(env, '👇 Caption in the next message (copy it)', '👇 Caption នៅសារបន្ទាប់ (copy យកទៅ post)'),
+  posterDone: (env, ok, msg) => (ok ? pick(env, '✅ Poster ready. Post it on Facebook / Instagram.', '✅ Poster រួចរាល់ — post លើ Facebook / Instagram')
+    : pick(env, `❌ Poster failed: ${msg}`, `❌ បង្កើត poster មិនបាន: ${msg}`)),
+  posterBusy: env => pick(env, '⏳ A poster is already in progress. One at a time: finish or /cancel it first.', '⏳ មាន poster មួយកំពុងធ្វើ — ម្តងមួយ។ សូមរង់ចាំ ឬ /cancel'),
+  posterStarted: env => pick(env, '🖼 Writing the poster text…', '🖼 កំពុងសរសេរអត្ថបទ poster…'),
   promoStarted: env => pick(env, '🎬 Writing the video script…', '🎬 កំពុងសរសេរ script វីដេអូ…'),
   forgetUsage: env => pick(env, 'Use: /forget <name>  (see names with /memory)', 'ប្រើ: /forget <ឈ្មោះ>  (មើលឈ្មោះក្នុង /memory)'),
   forgetMissing: (env, key) => pick(env, `Nothing saved as "${key}". See /memory.`, `គ្មាន "${key}" ទេ។ មើល /memory`),
@@ -179,4 +185,5 @@ export const KM_ACTION = {
   prepare_book_draft: 'រៀបចំ draft?',
   publish_book: 'Publish លើវេបសាយ?',
   create_promo_video: 'បង្កើតវីដេអូ?',
+  create_poster: 'បង្កើត poster?',
 };

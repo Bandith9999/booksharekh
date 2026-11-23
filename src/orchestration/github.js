@@ -38,7 +38,7 @@ export const workflowUrl = (env, wf = WORKFLOWS.demo) =>
 export async function jobPayload(env, task, action = null, step = null) {
   const wf = workflowOf(action);
   // Promo videos bind to the exact AI-written lines and captions the owner saw.
-  const plan = await latestArtifact(env, task.id, task.task_type === 'book_promo' ? 'promo' : 'plan');
+  const plan = await latestArtifact(env, task.id, { book_promo: 'promo', poster: 'poster' }[task.task_type] || 'plan');
   const inputs = { task_id: task.id };
   if (wf === WORKFLOWS.website_deploy) {
     inputs.sha = deployShaOf(step);

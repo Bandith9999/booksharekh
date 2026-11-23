@@ -94,9 +94,9 @@ export async function pickCovers(env) {
 }
 
 // Next theme in rotation, plus the member count when the API allows it (a real number, never invented).
-export async function nextPromoInput(env) {
-  const i = (Number(await getSetting(env, THEME_INDEX)) || 0) % THEMES.length;
-  await setSetting(env, THEME_INDEX, i + 1);
+export async function nextPromoInput(env, indexKey = THEME_INDEX) {
+  const i = (Number(await getSetting(env, indexKey)) || 0) % THEMES.length;
+  await setSetting(env, indexKey, i + 1);
   let members = null;
   try { members = Number((await userActivity(env, 24))?.total_users) || null; } catch { /* optional */ }
   return { theme: THEMES[i], members, covers: await pickCovers(env) };
