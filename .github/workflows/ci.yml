@@ -22,7 +22,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install FFmpeg and fonts (same as the job workflow)
         run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-noto-core
-      - run: python3 scripts/test_promo_render.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install Khmer voice-over (same as the job workflow)
+        run: python3 -m pip install --user edge-tts==7.3.1
+      - run: node scripts/test_promo_render.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -89,17 +89,17 @@ export async function createDeployTask(env, { userId, sha, preview }) {
   return { id };
 }
 
-// /promo: the Video Creator writes Khmer lines + captions for the chosen books (AI step), then the
-// owner approves rendering (GitHub Actions). Videos and captions come back in Telegram; nothing is posted.
-export async function createPromoTask(env, { userId, books }) {
+// /promo: one video about the website. The Video Creator writes the Khmer script (AI step), then the
+// owner approves rendering (GitHub Actions). The video and caption come back in Telegram; nothing is posted.
+export async function createPromoTask(env, { userId, input }) {
   const limited = await rateLimited(env, userId);
   if (limited) return limited;
   const id = newId('BSK');
   await env.DB.prepare('INSERT INTO tasks (id,telegram_user_id,request_text,task_type,proposal,status) VALUES (?,?,?,?,?,?)')
-    .bind(id, String(userId), clamp(`Promo videos: ${books.map(b => `#${b.id} ${b.title}`).join('; ')}`, 2000), 'book_promo', '(writing captions)', 'planning').run();
-  const writeId = await insertStep(env, { taskId: id, agent: 'video_creator', action: 'write_promo', status: 'queued', input: { books } });
+    .bind(id, String(userId), clamp(`Promo video for booksharekh.com — theme: ${input.theme}`, 2000), 'book_promo', '(writing script)', 'planning').run();
+  const writeId = await insertStep(env, { taskId: id, agent: 'video_creator', action: 'write_promo', status: 'queued', input });
   await insertStep(env, { taskId: id, agent: 'video_creator', action: 'promo_video_job', status: 'pending', dependsOn: [writeId] });
-  await audit(env, id, 'TASK_CREATED', userId, `book_promo ${books.map(b => b.id).join(',')}`);
+  await audit(env, id, 'TASK_CREATED', userId, `book_promo theme="${clamp(input.theme, 80)}" covers=${(input.covers || []).map(c => c.id).join(',')}`);
   try {
     await enqueueStep(env, writeId);
   } catch (e) {

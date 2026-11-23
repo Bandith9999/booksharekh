@@ -11,57 +11,79 @@ const book = (id, title, author, views = 0) => ({ id, title, author, views, url:
 const tgOk = [/api\.telegram\.org/, () => Response.json({ ok: true, result: {} })];
 
 function promoSite() {
-  return [/\/api\/ai\/books\?/, url => {
+  return [/\/api\/ai\/(books\?|users\/activity)/, url => {
+    if (url.includes('/users/activity')) return Response.json({ now: '2026-11-23 10:00:00', total_users: 232, registered: [], logins: [] });
     const p = new URL(url).searchParams;
     assert.equal(p.get('promo'), '1');
-    return Response.json({ data: p.has('popular') ? [book(1, 'Emma', 'Jane Austen', 50), book(2, 'Dracula', 'Bram Stoker', 9)] : [book(3, 'New Book', 'Sok Dara'), book(1, 'Emma', 'Jane Austen')] });
+    return Response.json({ data: p.has('popular') ? [book(1, 'Emma', 'Jane Austen', 50), book(2, 'Dracula', 'Bram Stoker', 9), book(4, 'Ulysses', 'James Joyce', 5)] : [book(3, 'New Book', 'Sok Dara'), book(1, 'Emma', 'Jane Austen')] });
   }];
 }
-const upload = (e, taskId, i, bytes = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]), secret = 'cb-secret') =>
-  worker.fetch(new Request(`https://w.example/job-video/${taskId}/${i}`, { method: 'POST', headers: { Authorization: `Bearer ${secret}`, 'content-type': 'video/mp4' }, body: bytes }), e);
+const upload = (e, taskId, i, bytes = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]), secret = 'cb-secret', query = '?voiced=1') =>
+  worker.fetch(new Request(`https://w.example/job-video/${taskId}/${i}${query}`, { method: 'POST', headers: { Authorization: `Bearer ${secret}`, 'content-type': 'video/mp4' }, body: bytes }), e);
 
-test('/promo: 1 popular + 1 new book → Khmer captions → approve → videos and captions in Telegram', async () => {
+test('/promo: ONE website video → Khmer script with voice-over → approve → video + caption in Telegram', async () => {
   const e = env();
   const calls = mockFetch([tgOk, routes.dispatchOk, promoSite()]);
   await telegram(e, msg('/promo'));
-  assert.equal(lastText(calls), '🎬 កំពុងសរសេរ caption…');
+  assert.equal(lastText(calls), '🎬 កំពុងសរសេរ script វីដេអូ…');
   await drain(e);
   const approval = sent(calls).at(-1);
-  assert.match(approval.text, /^🎬 វីដេអូ 2\n\n1\. 🔥 ពេញនិយម Emma — Jane Austen\n「[^」]+」[\s\S]*2\. 🆕 ថ្មី New Book — Sok Dara[\s\S]*👉 បង្កើតវីដេអូ\?$/);
+  assert.match(approval.text, /^🎬 BookShareKH \[DEMO\]\n1\. ចង់អានសៀវភៅល្អៗ\?\n   🔊 [^\n]+\n2\. [\s\S]*👉 បង្កើតវីដេអូ\?$/, 'shows on-screen text and voice-over');
+  assert.doesNotMatch(approval.text, /Emma|Jane Austen/, 'promotes the website, not a book');
   const task = latestTask(e);
   assert.equal(task.task_type, 'book_promo');
-  assert.equal(calls.filter(c => c.url.endsWith('/dispatches')).length, 0, 'nothing rendered before approval');
 
-  await telegram(e, press(approveButton(calls)));
+  // The AI got only code-defined site facts, a theme and the real member count; no book titles.
+  const step = e.DB.db.prepare("SELECT input FROM agent_tasks WHERE task_id=? AND action='write_promo'").get(task.id);
+  const input = JSON.parse(step.input);
+  assert.equal(input.members, 232);
+  assert.match(input.theme, /BookShareKH/);
+  assert.deepEqual(input.covers.map(c => c.id), [1, 2, 3], '2 most viewed + 1 newest cover, visuals only');
+
+  // One at a time: a second /promo while this one is open is refused.
+  await telegram(e, msg('/promo'));
+  assert.match(lastText(calls), /^⏳ មានវីដេអូមួយកំពុងធ្វើ/);
+
+  await telegram(e, press(approveButton(calls.filter(c => !/⏳/.test(c.body?.text || '')))));
   await drain(e);
-  const d = calls.filter(c => c.url.endsWith('/dispatches'));
-  assert.equal(d.length, 1);
-  assert.match(d[0].url, /\/repos\/owner\/repo\/actions\/workflows\/worker-job\.yml\/dispatches$/);
+  assert.equal(calls.filter(c => c.url.endsWith('/dispatches')).length, 1);
 
   const got = await (await job(e, 'GET', `/job/${task.id}`)).json();
-  assert.deepEqual(got.videos.map(v => [v.title, v.cover_url]), [['Emma', `${SITE}/covers/1.jpg`], ['New Book', `${SITE}/covers/3.jpg`]]);
-  assert.ok(got.videos[0].hook && got.videos[0].lines.length);
+  assert.equal(got.videos.length, 1);
+  assert.equal(got.videos[0].voice, 'km-KH-SreymomNeural');
+  assert.ok(got.videos[0].scenes.every(s => s.text && s.voice));
+  assert.deepEqual(got.videos[0].covers, [`${SITE}/covers/1.jpg`, `${SITE}/covers/2.jpg`, `${SITE}/covers/3.jpg`]);
 
   assert.equal((await upload(e, task.id, 0, undefined, 'wrong')).status, 401);
-  assert.equal((await upload(e, task.id, 5)).status, 400);
+  assert.equal((await upload(e, task.id, 1)).status, 400, 'only one video per task');
   assert.equal((await upload(e, task.id, 0)).status, 200);
   const video = calls.filter(c => c.url.endsWith('/sendVideo')).map(c => Object.fromEntries(c.body.entries()));
   assert.equal(video.length, 1);
-  assert.match(video[0].caption, /^\*\*\* វីដេអូផ្សព្វផ្សាយ \*\*\*\n🎬 1\/2 · Emma — Jane Austen/);
-  assert.ok(video[0].video instanceof Blob);
-  assert.match(lastText(calls), /BookShareKH[\s\S]*https:\/\/booksharekh\.com\/book\/b1\n\n#BookShareKH/, 'caption alone, ready to copy');
+  assert.equal(video[0].caption, '*** វីដេអូផ្សព្វផ្សាយ ***\n🎬 BookShareKH [DEMO]\n👇 Caption នៅសារបន្ទាប់ (copy យកទៅ post)');
+  assert.match(lastText(calls), /^\[DEMO\][\s\S]*📖 booksharekh\.com\n\n#BookShareKH/, 'caption alone, ready to copy');
   assert.equal((await (await upload(e, task.id, 0)).json()).duplicate, true, 'a retried upload is not sent twice');
-  assert.equal(calls.filter(c => c.url.endsWith('/sendVideo')).length, 1);
-  await upload(e, task.id, 1);
 
-  await job(e, 'POST', '/job-result', { task_id: task.id, status: 'completed', note: '2 promo video(s) sent to Telegram.' });
+  await job(e, 'POST', '/job-result', { task_id: task.id, status: 'completed', note: 'Promo video sent to Telegram.' });
   assert.equal(lastText(calls), '✅ វីដេអូរួចរាល់ — post លើ TikTok / Facebook');
-  assert.equal(latestTask(e).status, 'completed');
 
-  // Promoted books are skipped for 14 days: next /promo picks Dracula (popular), and no new book is left.
+  // Next video: a different theme, and covers used this week are skipped when possible.
   await telegram(e, msg('/promo'));
   await drain(e);
-  assert.match(sent(calls).at(-1).text, /^🎬 វីដេអូ 1\n\n1\. 🔥 ពេញនិយម Dracula/);
+  const next = JSON.parse(e.DB.db.prepare("SELECT input FROM agent_tasks WHERE action='write_promo' ORDER BY rowid DESC LIMIT 1").get().input);
+  assert.notEqual(next.theme, input.theme);
+  assert.equal(next.covers[0].id, 4, 'an unused popular cover comes first');
+});
+
+test('the video says when it has no voice-over', async () => {
+  const e = env();
+  const calls = mockFetch([tgOk, routes.dispatchOk, promoSite()]);
+  await telegram(e, msg('/promo'));
+  await drain(e);
+  await telegram(e, press(approveButton(calls)));
+  await drain(e);
+  await upload(e, latestTask(e).id, 0, undefined, 'cb-secret', '?voiced=0');
+  const v = Object.fromEntries(calls.find(c => c.url.endsWith('/sendVideo')).body.entries());
+  assert.match(v.caption, /🎬 BookShareKH \[DEMO\] \(គ្មានសំឡេងលើកនេះ\)/);
 });
 
 test('a promo job that reports "completed" without sending any video is reported as a failure', async () => {

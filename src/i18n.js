@@ -108,15 +108,15 @@ ${url}` : ''}`),
   usersSummary: (env, total, reg, logins) => pick(env, `👥 Total users: ${total}\n🆕 New (24h): ${reg}\n🔑 Logged in (24h): ${logins}`,
     `👥 សរុប ${total} នាក់\n🆕 ថ្មី (24h): ${reg}\n🔑 Login (24h): ${logins}`),
   // Marketing promo videos (posting on TikTok / Facebook is done by the owner).
-  promoVideo: (env, n, total, b) => `${note(env, 'promo')}\n🎬 ${n}/${total} · ${b.title}${b.author ? ` — ${b.author}` : ''}\n` +
+  promoVideo: (env, v, voiced) => `${note(env, 'promo')}\n🎬 ${v.title}${voiced === false ? pick(env, ' (no voice-over this time)', ' (គ្មានសំឡេងលើកនេះ)') : ''}\n` +
     pick(env, '👇 Caption in the next message (copy it)', '👇 Caption នៅសារបន្ទាប់ (copy យកទៅ post)'),
-  promoDone: (env, ok, msg) => (ok ? pick(env, '✅ Promo videos ready. Post them on TikTok / Facebook.', '✅ វីដេអូរួចរាល់ — post លើ TikTok / Facebook')
+  promoDone: (env, ok, msg) => (ok ? pick(env, '✅ Video ready. Post it on TikTok / Facebook.', '✅ វីដេអូរួចរាល់ — post លើ TikTok / Facebook')
     : pick(env, `❌ Promo video failed: ${msg}`, `❌ បង្កើតវីដេអូមិនបាន: ${msg}`)),
+  promoBusy: env => pick(env, '⏳ A promo video is already in progress. One at a time: finish or /cancel it first.', '⏳ មានវីដេអូមួយកំពុងធ្វើ — ម្តងមួយ។ សូមរង់ចាំ ឬ /cancel'),
   recommend: (env, lines) => [note(env, 'recommend'),
     pick(env, '📈 Popular books the website does not have yet:', '📈 សៀវភៅពេញនិយម ដែលវេបសាយមិនទាន់មាន:'), ...lines].join('\n'),
   recommendNone: env => pick(env, 'No new book ideas this time: the sources are down or the site already has them.', 'គ្មានសៀវភៅថ្មីសម្រាប់ណែនាំលើកនេះ'),
-  promoNone: env => pick(env, 'No book to promote: all popular and new books were promoted in the last 14 days.', 'គ្មានសៀវភៅថ្មីសម្រាប់ផ្សព្វផ្សាយ (បានធ្វើក្នុង 14 ថ្ងៃមុនរួច)'),
-  promoStarted: env => pick(env, '🎬 Writing Khmer captions…', '🎬 កំពុងសរសេរ caption…'),
+  promoStarted: env => pick(env, '🎬 Writing the video script…', '🎬 កំពុងសរសេរ script វីដេអូ…'),
   noTopups: env => pick(env, 'No pending top-ups.', 'គ្មាន topup រង់ចាំ'),
   booksHeading: (env, n) => pick(env, `Latest ${n} books:`, `សៀវភៅថ្មីៗ ${n}:`),
   searchHeading: (env, q) => pick(env, `Books matching "${q}":`, `លទ្ធផល "${q}":`),

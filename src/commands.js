@@ -16,7 +16,7 @@ import { WebsiteApiError, apiConfigured, apiHealth, formatBooks, latestBooks, se
 import { decideTopup, pendingTopups, sendTopupAlert } from './website/topups.js';
 import { usersSummary } from './website/users.js';
 import { sendSamples } from './samples.js';
-import { pickPromoBooks } from './marketing/promo.js';
+import { nextPromoInput } from './marketing/promo.js';
 import { sendRecommendations } from './marketing/recommend.js';
 import { DEPARTMENTS, DEPT_BY_KEY, TAP_COMMANDS, registerMenu, sendDepartment, sendHelp } from './departments.js';
 
@@ -298,9 +298,11 @@ export async function handleMessage(env, m) {
     case 'preview': return sendSamples(env, chat);
     case 'promo': {
       try {
-        const books = await pickPromoBooks(env);
-        if (!books.length) return reply(env, chat, T.promoNone(env));
-        const r = await createPromoTask(env, { userId: user, books });
+        // One video at a time, about the website (covers are only visuals).
+        const busy = await env.DB.prepare(`SELECT id FROM tasks WHERE task_type='book_promo'
+            AND status IN ('planning','queued','awaiting_approval','dispatching','running') AND created_at > datetime('now','-2 hours') LIMIT 1`).first();
+        if (busy) return reply(env, chat, T.promoBusy(env));
+        const r = await createPromoTask(env, { userId: user, input: await nextPromoInput(env) });
         if (r.rateLimited) return reply(env, chat, T.rateLimited(env, r.limit, r.period));
         if (r.failed) return;
         return reply(env, chat, T.promoStarted(env));
