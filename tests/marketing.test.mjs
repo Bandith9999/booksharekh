@@ -62,7 +62,7 @@ test('/promo: ONE website video → Khmer script with voice-over → approve →
   assert.equal((await upload(e, task.id, 0)).status, 200);
   const video = calls.filter(c => c.url.endsWith('/sendVideo')).map(c => Object.fromEntries(c.body.entries()));
   assert.equal(video.length, 1);
-  assert.equal(video[0].caption, '*** វីដេអូផ្សព្វផ្សាយ ***\n🎬 BookShareKH [DEMO]\n👇 Caption នៅសារបន្ទាប់ (copy យកទៅ post)');
+  assert.equal(video[0].caption, '📣 Marketing · *** វីដេអូផ្សព្វផ្សាយ ***\n🎬 BookShareKH [DEMO]\n👇 Caption នៅសារបន្ទាប់ (copy យកទៅ post)');
   assert.match(lastText(calls), /^\[DEMO\][\s\S]*📖 booksharekh\.com\n\n#BookShareKH/, 'caption alone, ready to copy');
   assert.equal((await (await upload(e, task.id, 0)).json()).duplicate, true, 'a retried upload is not sent twice');
 
@@ -135,7 +135,7 @@ test('/recommend: at least 10 popular books the site lacks, as a plain title —
   await telegram(e, msg('/recommend'));
   const m = sent(calls).at(-1);
   const lines = m.text.split('\n').filter(l => /^\d+\. /.test(l));
-  assert.match(m.text, /^\*\*\* ណែនាំសៀវភៅ \*\*\*\n📈 សៀវភៅពេញនិយម ដែលវេបសាយមិនទាន់មាន:/);
+  assert.match(m.text, /^👑 Administrator · \*\*\* ណែនាំសៀវភៅ \*\*\*\n📈 សៀវភៅពេញនិយម ដែលវេបសាយមិនទាន់មាន:/);
   assert.ok(lines.length >= 10 && lines.length <= 12, `got ${lines.length}`);
   assert.ok(!m.text.includes('Atomic Habits'), 'books already on the site are skipped');
   assert.match(m.text, /\n\d+\. Trending 0 — Author 0\n/);
@@ -157,7 +157,7 @@ test('automatic recommendations: every 3 days at 09:00 Phnom Penh, once per wind
   assert.deepEqual(await pollRecommend(e, at(22, 2, 2)), { skipped: true }, 'not twice in the same window');
   assert.deepEqual(await pollRecommend(e, at(24, 2)), { skipped: true }, '2 days later: too early');
   assert.deepEqual(await pollRecommend(e, at(25, 2)), { sent: true }, '3 days later');
-  assert.equal(sent(calls).filter(x => x.text.startsWith('*** ណែនាំសៀវភៅ ***')).length, 2);
+  assert.equal(sent(calls).filter(x => x.text.startsWith('👑 Administrator · *** ណែនាំសៀវភៅ ***')).length, 2);
   const weekly = env({ RECOMMEND_EVERY_DAYS: '7' });
   await pollRecommend(weekly, at(1, 2));
   assert.deepEqual(await pollRecommend(weekly, at(5, 2)), { skipped: true }, 'weekly setting');

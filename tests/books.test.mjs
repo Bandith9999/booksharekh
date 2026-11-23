@@ -135,7 +135,7 @@ test('book requests: silent first poll, then alerts; Find → legal search → i
   state.requests.push({ id: 5, book_title: 'Moby Dick', author: 'Herman Melville', language: 'English', status: 'pending' });
   await worker.scheduled({}, env, {});
   const alert = sent(calls).at(-1);
-  assert.match(alert.text, /^\*\*\* BOOK REQUEST \*\*\*\n📚 #5 Moby Dick — Herman Melville \(English\)/);
+  assert.match(alert.text, /^📣 Marketing · \*\*\* BOOK REQUEST \*\*\*\n📚 #5 Moby Dick — Herman Melville \(English\)/);
   assert.deepEqual(alert.reply_markup.inline_keyboard[0].map(b => b.callback_data), ['rq:5', 'rr:5']);
   await worker.scheduled({}, env, {});
   assert.equal(sent(calls).filter(m => /BOOK REQUEST \*\*\*\n📚 #5 /.test(m.text)).length, 1, 'each request announced once');
@@ -158,7 +158,7 @@ test('/requests lists pending requests made before the watcher started, with but
   await worker.scheduled({}, env, {});
   await telegram(env, msg('/requests'));
   const out = sent(calls).at(-1);
-  assert.match(out.text, /^\*\*\* BOOK REQUEST \*\*\*\n📚 #4 testing — Testing/);
+  assert.match(out.text, /^📣 Marketing · \*\*\* BOOK REQUEST \*\*\*\n📚 #4 testing — Testing/);
   assert.deepEqual(out.reply_markup.inline_keyboard[0].map(b => b.callback_data), ['rq:4', 'rr:4']);
   assert.equal(sent(calls).filter(m => /Done one/.test(m.text)).length, 0, 'only pending');
 });

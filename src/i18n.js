@@ -5,16 +5,17 @@
 export const isKhmer = env => env?.BOT_LANGUAGE === 'km';
 const pick = (env, en, km) => (isKhmer(env) ? km : en);
 
-// First line of every alert, so the kind is clear at a glance (owner request).
+// First line of every alert: the department it belongs to (as in /help) and the kind of alert (owner request).
+const DEPT = { finance: '💰 Finance', hr: '👥 HR', marketing: '📣 Marketing', admin: '👑 Administrator' };
 const NOTES = {
-  topup: ['TOP-UP', 'បញ្ចូលប្រាក់'],
-  member: ['NEW MEMBER', 'សមាជិកថ្មី'],
-  request: ['BOOK REQUEST', 'សំណើសៀវភៅ'],
-  purchase: ['BOOK PURCHASE', 'ទិញសៀវភៅ'],
-  promo: ['PROMO VIDEO', 'វីដេអូផ្សព្វផ្សាយ'],
-  recommend: ['BOOK IDEAS', 'ណែនាំសៀវភៅ'],
+  topup: ['finance', 'TOP-UP', 'បញ្ចូលប្រាក់'],
+  purchase: ['finance', 'BOOK PURCHASE', 'ទិញសៀវភៅ'],
+  member: ['hr', 'NEW MEMBER', 'សមាជិកថ្មី'],
+  request: ['marketing', 'BOOK REQUEST', 'សំណើសៀវភៅ'],
+  promo: ['marketing', 'PROMO VIDEO', 'វីដេអូផ្សព្វផ្សាយ'],
+  recommend: ['admin', 'BOOK IDEAS', 'ណែនាំសៀវភៅ'],
 };
-export const note = (env, kind) => `*** ${pick(env, ...NOTES[kind])} ***`;
+export const note = (env, kind) => { const [dept, en, km] = NOTES[kind]; return `${DEPT[dept]} · *** ${pick(env, en, km)} ***`; };
 const short = id => `${String(id).slice(0, 17)}…`;
 
 export const T = {
