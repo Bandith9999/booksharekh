@@ -52,7 +52,8 @@ def upload_video(i, path, voiced=True):
 def api(path, payload=None):
     data=json.dumps(payload).encode() if payload is not None else None
     # Cloudflare blocks the default "Python-urllib" user agent (error 1010), so always send our own.
-    req=urllib.request.Request(root+path,data=data,headers={'Authorization':'Bearer '+secret, 'Content-Type':'application/json','User-Agent':'BookShareKH-GitHub-Runner/1.0'})
+    # X-Runner-Version: the Worker only hands promo jobs to a runner that has the current renderer.
+    req=urllib.request.Request(root+path,data=data,headers={'Authorization':'Bearer '+secret, 'Content-Type':'application/json','User-Agent':'BookShareKH-GitHub-Runner/1.0','X-Runner-Version':'2'})
     with urllib.request.urlopen(req,timeout=25) as res:
         return json.loads(res.read())
 

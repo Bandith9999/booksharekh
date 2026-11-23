@@ -48,7 +48,10 @@ test('/promo: ONE website video → Khmer script with voice-over → approve →
   await drain(e);
   assert.equal(calls.filter(c => c.url.endsWith('/dispatches')).length, 1);
 
-  const got = await (await job(e, 'GET', `/job/${task.id}`)).json();
+  const old = await job(e, 'GET', `/job/${task.id}`);
+  assert.equal(old.status, 409, 'an out-of-date runner on main gets no promo job');
+  assert.match((await old.json()).error, /merge the latest code into main/);
+  const got = await (await worker.fetch(new Request(`https://w.example/job/${task.id}`, { headers: { Authorization: 'Bearer cb-secret', 'X-Runner-Version': '2' } }), e)).json();
   assert.equal(got.videos.length, 1);
   assert.equal(got.videos[0].voice, 'km-KH-SreymomNeural');
   assert.ok(got.videos[0].scenes.every(s => s.text && s.voice));

@@ -39,7 +39,7 @@ async function telegramWebhook(request, env) {
 function authorizedJob(request, env) {
   return Boolean(env.JOB_CALLBACK_SECRET && request.headers.get('Authorization') === `Bearer ${env.JOB_CALLBACK_SECRET}`);
 }
-async function getJob(env, id) {
+async function getJob(env, id, request) {
   const job = await env.DB.prepare('SELECT id,request_text,task_type,status FROM tasks WHERE id=?').bind(id).first();
   if (!job) return json({ error: 'not found' }, 404);
   if (!['queued', 'dispatching', 'running'].includes(job.status)) return json({ error: 'not queued' }, 409);
@@ -48,6 +48,8 @@ async function getJob(env, id) {
   if (deploy) return json({ ...job, deploy_sha: deployShaOf(deploy) });
   // Promo jobs get the approved script (the same artifact the approval is bound to) and the voice.
   if (job.task_type === 'book_promo') {
+    // An old runner on main would render an empty video from the new script format.
+    if (Number(request.headers.get('X-Runner-Version') || 0) < 2) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
     const promo = await promoOf(env, id);
     const voice = /^km-KH-[A-Za-z]+Neural$/.test(env.PROMO_VOICE || '') ? env.PROMO_VOICE : 'km-KH-SreymomNeural';
     return json({ ...job, videos: (promo?.videos || []).slice(0, 1).map(v => ({ scenes: v.scenes, covers: v.covers || [], voice })) });
@@ -158,7 +160,7 @@ export default {
       if (u.pathname.startsWith('/job/') && request.method === 'GET') {
         if (!authorizedJob(request, env)) return json({ error: 'unauthorized' }, 401);
         const id = u.pathname.slice(5);
-        return safeTaskId(id) ? await getJob(env, id) : json({ error: 'bad id' }, 400);
+        return safeTaskId(id) ? await getJob(env, id, request) : json({ error: 'bad id' }, 400);
       }
       if (request.method === 'POST' && u.pathname === '/job-result') {
         if (!authorizedJob(request, env)) return json({ error: 'unauthorized' }, 401);
