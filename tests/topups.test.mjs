@@ -107,3 +107,21 @@ test('only the owner can decide; /topups re-sends pending alerts', async () => {
   assert.equal(lastText(calls), 'គ្មាន topup រង់ចាំ');
   assert.ok(sent(calls).length >= 1);
 });
+
+test('only top-up alerts make a sound; every other message is silent', async () => {
+  const e = env();
+  const rows = [topup(20), topup(21, { has_image: false })];
+  const s = site(rows);
+  const calls = mockFetch([[/api\.telegram\.org/, () => Response.json({ ok: true, result: {} })], s.route, s.requests]);
+  await worker.scheduled({}, e, {});
+  await telegram(e, press('ta:20'));
+  await telegram(e, msg('/help'));
+  const photo = calls.find(c => c.url.endsWith('/sendPhoto')).body;
+  assert.equal(photo.get('disable_notification'), 'false', 'receipt photo alert rings');
+  const msgs = calls.filter(c => c.url.endsWith('/sendMessage')).map(c => c.body);
+  const alert = msgs.find(m => /Top-up #21/.test(m.text) && m.reply_markup);
+  assert.equal(alert.disable_notification, false, 'text-only top-up alert rings');
+  const others = msgs.filter(m => m !== alert);
+  assert.ok(others.length >= 2);
+  for (const m of others) assert.equal(m.disable_notification, true, m.text.slice(0, 40));
+});

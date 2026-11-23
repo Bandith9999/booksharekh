@@ -45,11 +45,12 @@ export async function sendTopupAlert(env, raw) {
         form.set('caption', caption);
         form.set('reply_markup', JSON.stringify(reply_markup));
         form.set('photo', new Blob([bytes], { type: r.headers.get('content-type') || 'image/jpeg' }), `topup-${t.id}.jpg`);
+        form.set('disable_notification', 'false'); // the only alert with sound
         return await tgForm(env, 'sendPhoto', form);
       }
     } catch (e) { console.error('top-up image failed', t.id, String(e)); }
   }
-  return notifyOwner(env, caption, { reply_markup });
+  return notifyOwner(env, caption, { reply_markup, disable_notification: false });
 }
 
 // Cron: alert on new manual top-ups. First run also alerts on top-ups already waiting.
