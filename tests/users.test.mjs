@@ -23,7 +23,7 @@ function site() {
   return { state, routes };
 }
 
-test('first check is silent; then one short message with new users, logins and the total', async () => {
+test('first check is silent; then one short message with new members and the total (no logins)', async () => {
   const e = env();
   const s = site();
   const calls = mockFetch(s.routes);
@@ -39,21 +39,26 @@ test('first check is silent; then one short message with new users, logins and t
   s.state.total = 1234;
   await worker.scheduled({}, e, {});
   assert.equal(s.state.asked[1].since, '2026-11-22 10:00:01', 'continues from the site time it returned');
-  assert.equal(lastText(calls), '*** សមាជិកថ្មី ***\n🆕 dara@example.com · dara\n🆕 nita\n\n*** Login ***\n🔑 sok, vanna\n\n👥 សរុប 1,234 នាក់');
+  assert.equal(lastText(calls), '*** សមាជិកថ្មី ***\n🆕 dara@example.com · dara\n🆕 nita\n\n👥 សរុប 1,234 នាក់');
 
   const before = sent(calls).length;
   await worker.scheduled({}, e, {});
   assert.equal(sent(calls).length, before, 'nothing new -> no message');
 });
 
-test('many logins are capped to 10 names', async () => {
+test('logins alone send no alert; many new members are capped to 10 lines', async () => {
   const e = env('en');
   const s = site();
   const calls = mockFetch(s.routes);
   await worker.scheduled({}, e, {});
-  s.state.activity = { registered: [], logins: Array.from({ length: 13 }, (_, i) => ({ user: `u${i}` })) };
+  const before = sent(calls).length;
+  s.state.activity = { registered: [], logins: [{ user: 'niza' }] };
   await worker.scheduled({}, e, {});
-  assert.equal(lastText(calls), '*** LOGIN ***\n🔑 u0, u1, u2, u3, u4, u5, u6, u7, u8, u9, +3\n\n👥 Total users: 1,200');
+  assert.equal(sent(calls).length, before, 'login only -> no message');
+  assert.ok(!sent(calls).some(m => /Login|🔑/.test(m.text)));
+  s.state.activity = { registered: Array.from({ length: 13 }, (_, i) => ({ user: `u${i}` })), logins: [{ user: 'niza' }] };
+  await worker.scheduled({}, e, {});
+  assert.equal(lastText(calls), `*** NEW MEMBER ***\n${Array.from({ length: 10 }, (_, i) => `🆕 u${i}`).join('\n')}\n+3\n\n👥 Total users: 1,200`);
 });
 
 test('/users shows the total and the last 24 hours', async () => {
@@ -81,4 +86,25 @@ test('/preview sends a sample of every alert with inert buttons, owner only', as
   const before = sent(calls).length;
   await telegram(e, msg('/preview', 999));
   assert.equal(sent(calls).length, before, 'other users get nothing');
+});
+
+test('book purchases: silent alert with buyer email, user name and book title; first run starts quietly', async () => {
+  const e = env();
+  const rows = [{ id: 7, email: 'old@example.com', user: 'old', book_title: 'Old Book' }];
+  const calls = mockFetch([[/api\.telegram\.org/, () => Response.json({ ok: true, result: {} })],
+    [/\/api\/ai\/purchases/, url => {
+      const after = Number(new URL(url).searchParams.get('after_id'));
+      return Response.json({ data: rows.filter(r => r.id > after), latest_id: Math.max(...rows.map(r => r.id)) });
+    }],
+    [/\/api\/ai\/(users|topups|requests)/, () => Response.json({ data: [], latest_id: 0, now: '2026-11-23 10:00:00', total_users: 1, registered: [], logins: [] })]]);
+  await worker.scheduled({}, e, {});
+  assert.ok(!sent(calls).some(m => /ទិញសៀវភៅ|Old Book/.test(m.text)), 'old purchases are not alerted');
+  rows.push({ id: 8, email: 'reader1@example.com', user: 'reader1', book_title: 'Emma' }, { id: 9, email: null, user: 'reader2', book_title: 'Dracula' });
+  await worker.scheduled({}, e, {});
+  const m = sent(calls).at(-1);
+  assert.equal(m.text, '*** ទិញសៀវភៅ ***\n🛒 reader1@example.com · reader1\n📖 Emma\n\n🛒 reader2\n📖 Dracula');
+  assert.equal(m.disable_notification, true, 'silent');
+  const before = sent(calls).length;
+  await worker.scheduled({}, e, {});
+  assert.equal(sent(calls).length, before, 'each purchase alerted once');
 });

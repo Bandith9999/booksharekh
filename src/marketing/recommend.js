@@ -1,7 +1,6 @@
 // Admin: every few days, recommend at least 10 popular books (title + author) that booksharekh.com
-// does not have yet. Sources: Open Library weekly trending (any rights) and Project Gutenberg's most
-// downloaded (public domain). Only public-domain ones get an import button; copyrighted titles need a
-// licence first. Nothing is added to the website without the owner's approvals.
+// does not have yet. Sources: Open Library weekly trending and Project Gutenberg's most downloaded.
+// A plain list for the owner (no buttons): nothing is downloaded or added to the website.
 import { clamp } from '../helpers.js';
 import { notifyOwner } from '../telegram.js';
 import { T } from '../i18n.js';
@@ -10,7 +9,7 @@ import { popularPublicDomain } from '../books/gutenberg.js';
 
 const LAST_RUN = 'recommend_last_run';
 const SEEN = 'recommended_titles';
-const WANT = 10, MAX = 12, MAX_SITE_CHECKS = 36, REPEAT_DAYS = 21;
+const MAX = 12, MAX_SITE_CHECKS = 36, REPEAT_DAYS = 21;
 const UA = { 'User-Agent': 'BookShareKH-AI-Manager/1.0 (+https://booksharekh.com)' };
 
 const getSetting = async (env, key) => (await env.DB.prepare('SELECT value FROM settings WHERE key=?').bind(key).first())?.value ?? null;
@@ -74,18 +73,14 @@ export async function recommendBooks(env) {
   return picked;
 }
 
+// Owner request: a plain list, title and author only (no buttons, no marks).
 export function recommendMessage(env, books) {
   if (!books.length) return { text: T.recommendNone(env) };
-  const text = T.recommend(env, books.map((b, i) => `${i + 1}. ${b.title} — ${b.author}${b.year ? ` (${b.year})` : ''} ${b.publicDomain ? '🟢' : '🔒'}`), books.length < WANT);
-  const buttons = books.map((b, i) => (b.publicDomain && b.gutenbergId ? { text: `📥 ${i + 1}`, callback_data: `bi:${b.gutenbergId}:0` } : null)).filter(Boolean).slice(0, 8);
-  const rows = [];
-  for (let i = 0; i < buttons.length; i += 4) rows.push(buttons.slice(i, i + 4));
-  return rows.length ? { text, reply_markup: { inline_keyboard: rows } } : { text };
+  return { text: T.recommend(env, books.map((b, i) => `${i + 1}. ${b.title} — ${b.author}`)) };
 }
 
 export async function sendRecommendations(env) {
-  const m = recommendMessage(env, await recommendBooks(env));
-  await notifyOwner(env, m.text, m.reply_markup ? { reply_markup: m.reply_markup } : {});
+  await notifyOwner(env, recommendMessage(env, await recommendBooks(env)).text);
 }
 
 // Cron: every RECOMMEND_EVERY_DAYS days (default 3; 7 = weekly) at 09:00 Phnom Penh (02:00 UTC).

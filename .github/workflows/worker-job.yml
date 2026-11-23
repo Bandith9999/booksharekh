@@ -20,6 +20,11 @@ jobs:
         uses: actions/checkout@v4
       - name: Install FFmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-noto-core
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install Khmer voice-over (edge-tts; the video is still made without voice if this fails)
+        run: python3 -m pip install --user edge-tts==7.3.1 || echo "edge-tts not installed"
       - name: Process approved job
         env:
           WORKER_URL: ${{ secrets.WORKER_URL }}

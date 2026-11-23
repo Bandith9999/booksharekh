@@ -17,12 +17,17 @@ function managerPlan({ taskType, request }) {
   };
 }
 
-// Video Creator promo scripts (demo text; a real provider writes the Khmer copy).
-function promoScripts({ books = [] }) {
-  return { videos: books.map(b => ({
-    book_id: b.id, hook: 'សៀវភៅល្អៗ សម្រាប់អ្នក', lines: [clamp(b.title, 60), 'អានឥឡូវនេះ'],
-    caption: `[DEMO] ${clamp(b.title, 100)}\nអានលើ BookShareKH\n📖 booksharekh.com`, hashtags: ['#BookShareKH', '#សៀវភៅ', '#Books'],
-  })) };
+// Video Creator promo script about the website (demo text; a real provider writes the Khmer copy).
+function promoScripts({ theme = '' }) {
+  return {
+    title: 'BookShareKH [DEMO]',
+    scenes: [
+      { text: 'ចង់អានសៀវភៅល្អៗ?', voice: 'ចង់អានសៀវភៅល្អៗមែនទេ?' },
+      { text: 'តម្លៃត្រឹមតែ $0.50', voice: 'តម្លៃត្រឹមតែហាសិបសេនក្នុងមួយក្បាល' },
+      { text: 'ចូលមើល booksharekh.com', voice: 'ចូលមើល booksharekh.com ឥឡូវនេះ' },
+    ],
+    caption: `[DEMO] ${clamp(theme, 80)}\nអានសៀវភៅលើ BookShareKH\n📖 booksharekh.com`, hashtags: ['#BookShareKH', '#សៀវភៅ', '#Books'],
+  };
 }
 
 export const mockProvider = {

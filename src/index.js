@@ -12,6 +12,7 @@ import { handleQueueBatch } from './orchestration/queue-consumer.js';
 import { pollBookRequests } from './books/requests.js';
 import { pollTopups } from './website/topups.js';
 import { pollUsers } from './website/users.js';
+import { pollPurchases } from './website/purchases.js';
 import { pollRecommend } from './marketing/recommend.js';
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -38,17 +39,20 @@ async function telegramWebhook(request, env) {
 function authorizedJob(request, env) {
   return Boolean(env.JOB_CALLBACK_SECRET && request.headers.get('Authorization') === `Bearer ${env.JOB_CALLBACK_SECRET}`);
 }
-async function getJob(env, id) {
+async function getJob(env, id, request) {
   const job = await env.DB.prepare('SELECT id,request_text,task_type,status FROM tasks WHERE id=?').bind(id).first();
   if (!job) return json({ error: 'not found' }, 404);
   if (!['queued', 'dispatching', 'running'].includes(job.status)) return json({ error: 'not queued' }, 409);
   // Deploy jobs verify they were dispatched for the approved commit.
   const deploy = await env.DB.prepare("SELECT input FROM agent_tasks WHERE task_id=? AND action='deploy_job' AND status='running'").bind(id).first();
   if (deploy) return json({ ...job, deploy_sha: deployShaOf(deploy) });
-  // Promo jobs get the approved books and on-screen text (the same artifact the approval is bound to).
+  // Promo jobs get the approved script (the same artifact the approval is bound to) and the voice.
   if (job.task_type === 'book_promo') {
+    // An old runner on main would render an empty video from the new script format.
+    if (Number(request.headers.get('X-Runner-Version') || 0) < 2) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
     const promo = await promoOf(env, id);
-    return json({ ...job, videos: (promo?.videos || []).map(v => ({ title: v.book.title, author: v.book.author, cover_url: v.book.cover_url, hook: v.hook, lines: v.lines })) });
+    const voice = /^km-KH-[A-Za-z]+Neural$/.test(env.PROMO_VOICE || '') ? env.PROMO_VOICE : 'km-KH-SreymomNeural';
+    return json({ ...job, videos: (promo?.videos || []).slice(0, 1).map(v => ({ scenes: v.scenes, covers: v.covers || [], voice })) });
   }
   return json(job);
 }
@@ -71,9 +75,10 @@ async function receiveVideo(request, env, taskId, index) {
   const chat = Number(task.telegram_user_id);
   const form = new FormData();
   form.set('chat_id', String(chat));
-  form.set('caption', clamp(T.promoVideo(env, index + 1, promo.videos.length, v.book), 1000));
+  const voiced = new URL(request.url).searchParams.get('voiced');
+  form.set('caption', clamp(T.promoVideo(env, v, voiced === '0' ? false : undefined), 1000));
   form.set('supports_streaming', 'true');
-  form.set('video', new Blob([bytes], { type: 'video/mp4' }), `booksharekh-${v.book.id}.mp4`);
+  form.set('video', new Blob([bytes], { type: 'video/mp4' }), 'booksharekh-promo.mp4');
   try {
     await tgForm(env, 'sendVideo', form);
     await reply(env, chat, v.caption); // caption alone: easy to copy into TikTok / Facebook
@@ -81,8 +86,8 @@ async function receiveVideo(request, env, taskId, index) {
     await env.DB.prepare('DELETE FROM settings WHERE key=?').bind(`promo_sent:${taskId}:${index}`).run();
     throw e;
   }
-  await markPromoted(env, [v.book.id]);
-  await audit(env, taskId, 'PROMO_VIDEO_SENT', 'github-actions', `#${v.book.id} ${clamp(v.book.title, 80)} ${bytes.byteLength} bytes`);
+  await markPromoted(env, v.cover_ids || []);
+  await audit(env, taskId, 'PROMO_VIDEO_SENT', 'github-actions', `${clamp(v.title, 80)} ${bytes.byteLength} bytes voiced=${voiced ?? '?'}`);
   return json({ ok: true });
 }
 async function finishJob(request, env) {
@@ -155,7 +160,7 @@ export default {
       if (u.pathname.startsWith('/job/') && request.method === 'GET') {
         if (!authorizedJob(request, env)) return json({ error: 'unauthorized' }, 401);
         const id = u.pathname.slice(5);
-        return safeTaskId(id) ? await getJob(env, id) : json({ error: 'bad id' }, 400);
+        return safeTaskId(id) ? await getJob(env, id, request) : json({ error: 'bad id' }, 400);
       }
       if (request.method === 'POST' && u.pathname === '/job-result') {
         if (!authorizedJob(request, env)) return json({ error: 'unauthorized' }, 401);
@@ -171,6 +176,7 @@ export default {
   async scheduled(event, env) {
     try { await pollTopups(env); } catch (e) { console.error('top-up poll failed', String(e)); }
     try { await pollUsers(env); } catch (e) { console.error('user activity poll failed', String(e)); }
+    try { await pollPurchases(env); } catch (e) { console.error('purchase poll failed', String(e)); }
     try { await pollRecommend(env, new Date(event?.scheduledTime || Date.now())); } catch (e) { console.error('book recommendations failed', String(e)); }
     try { await pollBookRequests(env); } catch (e) { console.error('book request poll failed', String(e)); }
   },
