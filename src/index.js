@@ -6,7 +6,7 @@ import { reply, tgForm } from './telegram.js';
 import { markPromoted, promoOf } from './marketing/promo.js';
 import { posterOf } from './marketing/poster.js';
 import { T } from './i18n.js';
-import { advance } from './orchestration/engine.js';
+import { advance, autoResume } from './orchestration/engine.js';
 import { deployShaOf, prReviewText } from './orchestration/github.js';
 import { handleCallback, handleMessage } from './commands.js';
 import { handleQueueBatch } from './orchestration/queue-consumer.js';
@@ -53,13 +53,13 @@ async function getJob(env, id, request) {
     if (Number(request.headers.get('X-Runner-Version') || 0) < 2) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
     const promo = await promoOf(env, id);
     const voice = /^km-KH-[A-Za-z]+Neural$/.test(env.PROMO_VOICE || '') ? env.PROMO_VOICE : 'km-KH-SreymomNeural';
-    return json({ ...job, videos: (promo?.videos || []).slice(0, 1).map(v => ({ scenes: v.scenes, covers: v.covers || [], voice })) });
+    return json({ ...job, videos: (promo?.videos || []).slice(0, 1).map(v => ({ scenes: v.scenes, covers: v.covers || [], voice, background_url: v.background?.url || null, logo_url: v.logo_url || null })) });
   }
   // Poster jobs get the approved poster text; they need the runner with the poster renderer (v3).
   if (job.task_type === 'poster') {
     if (Number(request.headers.get('X-Runner-Version') || 0) < 3) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
     const p = await posterOf(env, id);
-    return json({ ...job, posters: (p?.posters || []).slice(0, 1).map(x => ({ headline: x.headline, subline: x.subline, points: x.points, cta: x.cta, covers: x.covers || [] })) });
+    return json({ ...job, posters: (p?.posters || []).slice(0, 1).map(x => ({ headline: x.headline, subline: x.subline, points: x.points, cta: x.cta, covers: x.covers || [], background_url: x.background?.url || null, logo_url: x.logo_url || null })) });
   }
   return json(job);
 }
@@ -143,7 +143,7 @@ async function finishJob(request, env) {
       await env.DB.prepare(`INSERT INTO settings (key,value,updated_at) VALUES ('last_deployed_sha',?,CURRENT_TIMESTAMP)
           ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`).bind(deployedSha).run();
     }
-    await reply(env, Number(row.telegram_user_id), T.deployDone(env, state === 'completed', clamp(data.note, 300), url));
+    await tell(env, row, T.deployDone(env, state === 'completed', clamp(data.note, 300), url));
     return json({ ok: true });
   }
   if (MEDIA_OUT[row.task_type]) {
@@ -151,13 +151,15 @@ async function finishJob(request, env) {
     const got = await env.DB.prepare("SELECT COUNT(*) n FROM settings WHERE key LIKE ?").bind(`promo_sent:${data.task_id}:%`).first();
     const ok = state === 'completed' && got.n > 0;
     const done = row.task_type === 'poster' ? T.posterDone : T.promoDone;
-    await reply(env, Number(row.telegram_user_id), done(env, ok, ok ? '' : state === 'completed'
+    await tell(env, row, done(env, ok, ok ? '' : state === 'completed'
       ? 'nothing was received: the GitHub job on main is out of date (merge the latest code into main)' : clamp(data.note, 300)));
     return json({ ok: true });
   }
-  await reply(env, Number(row.telegram_user_id), T.jobDone(env, data.task_id, state, clamp(data.note, 300), url, row.task_type !== 'website_code_change', prUrl));
+  await tell(env, row, T.jobDone(env, data.task_id, state, clamp(data.note, 300), url, row.task_type !== 'website_code_change', prUrl));
   return json({ ok: true });
 }
+// The result is already recorded: a Telegram hiccup must not turn a finished job into an error.
+const tell = (env, row, text) => reply(env, Number(row.telegram_user_id), text).catch(e => console.error('result notice failed', String(e)));
 
 export default {
   async fetch(request, env) {
@@ -187,6 +189,7 @@ export default {
   },
   // Cron trigger (wrangler.jsonc): announce new booksharekh.com book requests in Telegram.
   async scheduled(event, env) {
+    try { await autoResume(env); } catch (e) { console.error('auto-resume failed', String(e)); }
     try { await pollTopups(env); } catch (e) { console.error('top-up poll failed', String(e)); }
     try { await pollUsers(env); } catch (e) { console.error('user activity poll failed', String(e)); }
     try { await pollPurchases(env); } catch (e) { console.error('purchase poll failed', String(e)); }

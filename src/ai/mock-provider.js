@@ -20,7 +20,7 @@ function managerPlan({ taskType, request }) {
 // Video Creator promo script about the website (demo text; a real provider writes the Khmer copy).
 function promoScripts({ theme = '' }) {
   return {
-    title: 'BookShareKH [DEMO]',
+    title: 'BookShareKH [DEMO]', background: 'dist/img/library-bg.jpg',
     scenes: [
       { text: 'ចង់អានសៀវភៅល្អៗ?', voice: 'ចង់អានសៀវភៅល្អៗមែនទេ?' },
       { text: 'តម្លៃត្រឹមតែ $0.50', voice: 'តម្លៃត្រឹមតែហាសិបសេនក្នុងមួយក្បាល' },
@@ -32,7 +32,7 @@ function promoScripts({ theme = '' }) {
 
 // Content Creator poster text (demo).
 const posterText = () => ({
-  title: 'Poster [DEMO]', headline: 'អានសៀវភៅល្អៗ គ្រប់ពេល', subline: 'សៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ',
+  title: 'Poster [DEMO]', background: 'dist/img/library-bg.jpg', headline: 'អានសៀវភៅល្អៗ គ្រប់ពេល', subline: 'សៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ',
   points: ['តម្លៃ $0.50', 'បញ្ចូលលុយតាម KHQR'], cta: 'ចូលមើលឥឡូវនេះ',
   caption: '[DEMO] អានសៀវភៅលើ BookShareKH\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#សៀវភៅ', '#Reading'],
 });
@@ -43,7 +43,8 @@ export const mockProvider = {
   modelPattern: /^mock$/,
 
   async generate(env, req) {
-    const responders = { manager: () => managerPlan(req.metadata || {}), video_creator: () => promoScripts(req.metadata || {}), content_creator: () => posterText() };
+    const responders = { manager: () => managerPlan(req.metadata || {}), video_creator: () => promoScripts(req.metadata || {}), content_creator: () => posterText(),
+      qa_reviewer: () => ({ agent: 'qa_reviewer', task_id: String(req.metadata?.task_id || ''), result: 'approved', issues: [], human_approval_required: true }) };
     if (!responders[req.agent]) throw new AIError(`mock provider has no responder for agent ${req.agent}`, { kind: 'config', provider: 'mock' });
     const content = JSON.stringify(responders[req.agent]());
     return makeResponse({

@@ -16,7 +16,7 @@ const file = join(out, 'poster.png');
 const res = await renderPoster({
   headline: 'អានសៀវភៅល្អៗ គ្រប់ពេល គ្រប់ទីកន្លែង', subline: 'សៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ',
   points: ['តម្លៃ $0.50 ក្នុងមួយក្បាល', 'បញ្ចូលលុយតាម KHQR', 'សៀវភៅថ្មីរៀងរាល់សប្តាហ៍'], cta: 'ចូលមើលឥឡូវនេះ',
-  covers: [], logo_url: 'https://booksharekh.com/dist/img/logo/logo.png',
+  covers: [], logo_url: 'https://booksharekh.com/dist/img/logo/logo.png', background_url: 'https://booksharekh.com/dist/img/library-bg.jpg',
 }, file);
 const info = JSON.parse(spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height,codec_name', '-of', 'json', file], { encoding: 'utf8' }).stdout).streams[0];
 assert.equal(info.codec_name, 'png');

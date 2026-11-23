@@ -30,7 +30,7 @@ async function dataUri(url, maxBytes = 8 * 1024 * 1024) {
   } catch { return null; }
 }
 
-export function posterHtml({ headline, subline, points = [], cta, covers = [], logo }) {
+export function posterHtml({ headline, subline, points = [], cta, covers = [], logo, background }) {
   const coverImgs = covers.slice(0, 3);
   // Fanned covers: centre in front, sides behind and tilted.
   const pos = coverImgs.length === 3 ? [['-215px', '-7deg', 0.86, 1], ['215px', '7deg', 0.86, 1], ['0px', '0deg', 1, 2]]
@@ -69,7 +69,7 @@ h1 .mark{background:linear-gradient(transparent 62%,rgba(182,212,51,.55) 62%);pa
 <div class="blob b1"></div><div class="blob b2"></div>
 <div class="top">${logo ? `<img src="${logo}">` : ''}<div class="brand">BookShare<span>KH</span></div><div class="url">booksharekh.com</div></div>
 <div class="text"><h1><span class="mark">${esc(headline)}</span></h1>${subline ? `<p class="sub">${esc(subline)}</p>` : ''}</div>
-<div class="panel"><div class="covers">${coverHtml}</div>
+<div class="panel"${background ? ` style="background:linear-gradient(150deg,rgba(38,70,83,.78) 0%,rgba(31,42,68,.90) 100%),url(${background}) center/cover"` : ''}><div class="covers">${coverHtml}</div>
 <div class="points">${points.slice(0, 3).map(p => `<div class="pt">✓ ${esc(p)}</div>`).join('')}</div>
 <div class="cta"><div class="btn">${esc(cta || 'ចូលមើលឥឡូវនេះ')}</div><div class="site">booksharekh.com</div></div></div>
 </body></html>`;
@@ -81,8 +81,9 @@ export async function renderPoster(job, outFile) {
   const covers = [];
   for (const url of (job.covers || []).slice(0, 3)) { const d = await dataUri(url); if (d) covers.push(d); }
   const logo = await dataUri(job.logo_url || 'https://booksharekh.com/dist/img/logo/logo.png', 4 * 1024 * 1024);
+  const background = await dataUri(job.background_url); // a website photo behind the panel, tinted in brand colours
   const html = join(work, 'poster.html');
-  writeFileSync(html, posterHtml({ ...job, covers, logo }), 'utf8');
+  writeFileSync(html, posterHtml({ ...job, covers, logo, background }), 'utf8');
   const chrome = CHROMES.find(c => !c.includes('/') || existsSync(c));
   let ok = false, err = '';
   for (const c of CHROMES) {
@@ -94,7 +95,7 @@ export async function renderPoster(job, outFile) {
     err = (r.stderr || r.error?.message || '').slice(-300);
   }
   if (!ok) throw new Error(`poster screenshot failed (${chrome || 'no Chrome found'}): ${err}`);
-  return { file: outFile, covers: covers.length, logo: Boolean(logo) };
+  return { file: outFile, covers: covers.length, logo: Boolean(logo), background: Boolean(background) };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

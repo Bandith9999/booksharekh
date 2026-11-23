@@ -5,6 +5,7 @@ import { TIERS } from '../ai/model-router.js';
 import { planAction } from './manager.js';
 import { promoAction } from '../marketing/promo.js';
 import { posterAction } from '../marketing/poster.js';
+import { qaContentAction } from './qa.js';
 import { PROMPTS } from './prompts.js';
 import { AGENT_NAMES, PLAN_SCHEMA, QA_SCHEMA, RESEARCH_SCHEMA } from './schemas.js';
 
@@ -132,8 +133,9 @@ const LIST = [
   {
     name: 'qa_reviewer', title: 'QA Reviewer', tier: 'review', phase: 3,
     description: 'Checks research, content, files, videos, code and rights before owner review.',
-    allowedTools: [], limitations: ['QA approval never replaces owner approval.'],
-    maxAttempts: 3, allowFallback: false, maxOutputTokens: 2000, outputSchema: QA_SCHEMA, actions: {},
+    allowedTools: [], limitations: ['QA approval never replaces owner approval.', 'Never receives private website code (free-tier Gemini prompts may be used by Google).'],
+    maxAttempts: 2, allowFallback: false, maxOutputTokens: 2000, outputSchema: QA_SCHEMA,
+    actions: { review_content: qaContentAction },
   },
 ].map(a => ({ ...a, prompt: PROMPTS[a.name] }));
 

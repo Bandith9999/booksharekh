@@ -194,9 +194,11 @@ test('/poster: website poster text → approve → PNG file + caption in Telegra
   assert.equal(lastText(calls), '🖼 កំពុងសរសេរអត្ថបទ poster…');
   await drain(e);
   const approval = sent(calls).at(-1);
-  assert.equal(approval.text, '🖼 Poster [DEMO]\n「អានសៀវភៅល្អៗ គ្រប់ពេល」\nសៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ\n✓ តម្លៃ $0.50\n✓ បញ្ចូលលុយតាម KHQR\n[ ចូលមើលឥឡូវនេះ ]\n\n👉 បង្កើត poster?');
+  assert.equal(approval.text, '🖼 Poster [DEMO]\n「អានសៀវភៅល្អៗ គ្រប់ពេល」\nសៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ\n✓ តម្លៃ $0.50\n✓ បញ្ចូលលុយតាម KHQR\n[ ចូលមើលឥឡូវនេះ ]\n\n🔎 QA (mock): ✅ ល្អ\n\n👉 បង្កើត poster?');
   const task = latestTask(e);
   assert.equal(task.task_type, 'poster');
+  const qaStep = e.DB.db.prepare("SELECT agent, status FROM agent_tasks WHERE task_id=? AND action='review_content'").get(task.id);
+  assert.deepEqual({ ...qaStep }, { agent: 'qa_reviewer', status: 'completed' }, 'QA ran before the approval');
   assert.equal(e.DB.db.prepare("SELECT agent FROM agent_tasks WHERE task_id=? AND action='write_poster'").get(task.id).agent, 'content_creator');
 
   await telegram(e, msg('/poster'));
@@ -212,7 +214,7 @@ test('/poster: website poster text → approve → PNG file + caption in Telegra
   assert.equal((await runner(2)).status, 409, 'a runner without the poster renderer gets nothing');
   const got = await (await runner(3)).json();
   assert.deepEqual(got.posters[0], { headline: 'អានសៀវភៅល្អៗ គ្រប់ពេល', subline: 'សៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ',
-    points: ['តម្លៃ $0.50', 'បញ្ចូលលុយតាម KHQR'], cta: 'ចូលមើលឥឡូវនេះ', covers: [`${SITE}/covers/1.jpg`, `${SITE}/covers/2.jpg`, `${SITE}/covers/3.jpg`] });
+    points: ['តម្លៃ $0.50', 'បញ្ចូលលុយតាម KHQR'], cta: 'ចូលមើលឥឡូវនេះ', covers: [`${SITE}/covers/1.jpg`, `${SITE}/covers/2.jpg`, `${SITE}/covers/3.jpg`], background_url: null, logo_url: null });
 
   const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
   const up = (path) => worker.fetch(new Request(`https://w.example${path}`, { method: 'POST', headers: { Authorization: 'Bearer cb-secret', 'content-type': 'image/png' }, body: png }), e);
@@ -224,4 +226,90 @@ test('/poster: website poster text → approve → PNG file + caption in Telegra
   assert.match(lastText(calls), /^\[DEMO\][\s\S]*#BookShareKH/);
   await job(e, 'POST', '/job-result', { task_id: task.id, status: 'completed', note: 'Poster sent to Telegram.' });
   assert.equal(lastText(calls), '✅ Poster រួចរាល់ — post លើ Facebook / Instagram');
+});
+
+test('QA by Gemini: issues are shown in the approval; if Gemini is not set up, QA is skipped and the approval still comes', async () => {
+  // Real routing: Claude writes, Gemini reviews. No GEMINI_API_KEY → QA skipped, never blocks.
+  const claudePoster = { title: 'Poster', background: 'none', headline: 'អានសៀវភៅ', subline: 'សៀវភៅច្រើន', points: ['តម្លៃ $0.50', 'KHQR'], cta: 'ចូលមើល', caption: 'x\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#a', '#b'] };
+  const anthropic = [/api\.anthropic\.com\/v1\/messages$/, () => Response.json({ model: 'claude-sonnet-5-5', stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 10 }, content: [{ type: 'text', text: JSON.stringify(claudePoster) }] })];
+  const base = { AI_PAID_ENABLED: 'true', AI_PROVIDER: 'anthropic', AI_MODEL: 'claude-sonnet-5-5', ANTHROPIC_API_KEY: 'sk-ant-x', AI_REVIEW_PROVIDER: 'google', AI_REVIEW_MODEL: 'gemini-3.8-flash' };
+
+  const noKey = env(base);
+  const c1 = mockFetch([tgOk, routes.dispatchOk, promoSite(), anthropic]);
+  await telegram(noKey, msg('/poster'));
+  await drain(noKey);
+  const a1 = sent(c1).at(-1);
+  assert.match(a1.text, /🔎 QA: មិនបានពិនិត្យ \(not set up\)\n\n👉 បង្កើត poster\?$/);
+  assert.ok(a1.reply_markup, 'approval buttons still sent');
+  assert.equal(c1.filter(c => /generativelanguage/.test(c.url)).length, 0);
+
+  const withKey = env({ ...base, GEMINI_API_KEY: 'g-key' });
+  const review = { agent: 'qa_reviewer', task_id: 'x', result: 'requires_changes', issues: ['ពាក្យ "ចូលមើល" គួរថា "ចូលមើលឥឡូវនេះ"'], human_approval_required: true };
+  const c2 = mockFetch([tgOk, routes.dispatchOk, promoSite(), anthropic,
+    [/generativelanguage\.googleapis\.com/, () => Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify(review) }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 5 }, modelVersion: 'gemini-3.8-flash' })]]);
+  await telegram(withKey, msg('/poster'));
+  await drain(withKey);
+  const g = c2.find(c => /generativelanguage/.test(c.url));
+  assert.ok(g, 'Gemini was asked');
+  assert.match(JSON.stringify(g.body), /អានសៀវភៅ/, 'Gemini reviewed the poster text');
+  assert.match(sent(c2).at(-1).text, /🔎 QA \(Gemini\): ⚠️ គួរកែ:\n• ពាក្យ "ចូលមើល" គួរថា "ចូលមើលឥឡូវនេះ"\n\n👉 បង្កើត poster\?$/);
+});
+
+test('hashtags: no "Khmer book" tags in any language; #BookShareKH and #សៀវភៅបរទេសល្បីៗ always included', async () => {
+  const { cleanHashtags } = await import('../src/marketing/promo.js');
+  assert.deepEqual(cleanHashtags(['#KhmerBooks', 'សៀវភៅខ្មែរ', '#khmer_book', '#Reading', '#BookShareKH', '#សៀវភៅ', 'Book Tok']),
+    ['#BookShareKH', '#សៀវភៅបរទេសល្បីៗ', '#Reading', '#សៀវភៅ', '#BookTok']);
+  assert.deepEqual(cleanHashtags([]), ['#BookShareKH', '#សៀវភៅបរទេសល្បីៗ']);
+});
+
+test('a finished job stays finished even if the "done" message to Telegram fails; Telegram 429 is retried once', async () => {
+  const e = env();
+  let tgCalls = 0;
+  const calls = mockFetch([[/api\.telegram\.org/, () => { tgCalls++; return tgCalls === 1 ? Response.json({ ok: false, parameters: { retry_after: 0 } }, { status: 429 }) : Response.json({ ok: true, result: {} }); }],
+    routes.dispatchOk, promoSite()]);
+  await telegram(e, msg('/poster'));
+  assert.equal(tgCalls, 2, 'the first send hit 429 and was retried');
+  await drain(e);
+  await telegram(e, press(approveButton(calls)));
+  await drain(e);
+  const t = latestTask(e);
+  await worker.fetch(new Request(`https://w.example/job-image/${t.id}/0`, { method: 'POST', headers: { Authorization: 'Bearer cb-secret', 'content-type': 'image/png' }, body: new Uint8Array([1]) }), e);
+  mockFetch([[/api\.telegram\.org/, () => Response.json({ ok: false }, { status: 500 })]]); // Telegram down for the "done" notice
+  const r = await job(e, 'POST', '/job-result', { task_id: t.id, status: 'completed', note: 'Poster sent to Telegram.' });
+  assert.equal(r.status, 200, 'the runner sees success');
+  assert.equal(latestTask(e).status, 'completed');
+});
+
+test('website images: the AI picks a background from /api/ai/media; logo always used; unknown names and payment images never used', async () => {
+  const { backgroundOf, logoOf, mediaForPrompt } = await import('../src/marketing/promo.js');
+  const e = env();
+  const media = [
+    { name: 'dist/img/logo/logo.png', url: `${SITE}/dist/img/logo/logo.png`, width: 3500, height: 3500 },
+    { name: 'dist/img/library-bg.jpg', url: `${SITE}/dist/img/library-bg.jpg`, width: 1376, height: 768 },
+    { name: 'images/banner.png', url: 'https://evil.example/banner.png', width: 10, height: 10 },
+  ];
+  const calls = mockFetch([tgOk, routes.dispatchOk, promoSite(), [/\/api\/ai\/media$/, () => Response.json({ data: media })]]);
+  await telegram(e, msg('/poster'));
+  await drain(e);
+  const step = JSON.parse(e.DB.db.prepare("SELECT input FROM agent_tasks WHERE action='write_poster' ORDER BY rowid DESC LIMIT 1").get().input);
+  assert.deepEqual(step.media.map(m => m.name), ['dist/img/logo/logo.png', 'dist/img/library-bg.jpg'], 'images from another host are dropped');
+  assert.match(sent(calls).at(-1).text, /^🖼 Poster \[DEMO\]\n🏞 library-bg\.jpg\n/, 'the owner sees which photo will be used');
+  await telegram(e, press(approveButton(calls)));
+  await drain(e);
+  const got = await (await worker.fetch(new Request(`https://w.example/job/${latestTask(e).id}`, { headers: { Authorization: 'Bearer cb-secret', 'X-Runner-Version': '3' } }), e)).json();
+  assert.equal(got.posters[0].background_url, `${SITE}/dist/img/library-bg.jpg`);
+  assert.equal(got.posters[0].logo_url, `${SITE}/dist/img/logo/logo.png`);
+
+  assert.equal(backgroundOf(step.media, 'dist/img/logo/logo.png'), null, 'the logo is never a background');
+  assert.equal(backgroundOf(step.media, 'https://evil.example/x.png'), null, 'only listed images');
+  assert.equal(backgroundOf(step.media, 'none'), null);
+  assert.equal(logoOf(step.media), `${SITE}/dist/img/logo/logo.png`);
+  assert.doesNotMatch(mediaForPrompt(step.media), /logo|https?:/, 'the AI sees names only, no URLs, no logo');
+});
+
+test('before the website has /api/ai/media, the logo and library photo are offered', async () => {
+  const { siteMedia } = await import('../src/website/laravel-api.js');
+  const e = env();
+  mockFetch([[/\/api\/ai\/media$/, () => new Response('nf', { status: 404 })]]);
+  assert.deepEqual((await siteMedia(e)).map(m => m.url), [`${SITE}/dist/img/logo/logo.png`, `${SITE}/dist/img/library-bg.jpg`]);
 });

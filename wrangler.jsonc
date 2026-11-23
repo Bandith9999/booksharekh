@@ -50,9 +50,21 @@
 		// Planning AI: Claude Sonnet 5.5 via the Anthropic API (owner decision 2026-11-22, ~ $0.01 per plan).
 		// Key: Cloudflare secret ANTHROPIC_API_KEY. Every tier inherits this default.
 		// $0 alternative (README section I): AI_DEFAULT_PROVIDER=google, AI_DEFAULT_MODEL=gemini-3.8-flash,
-		// AI_PAID_ENABLED=false, plus the secret GEMINI_API_KEY.
+		// AI_PAID_ENABLED=false, empty AI_DEFAULT_CHAIN / AI_REVIEW_CHAIN, plus the secret GEMINI_API_KEY.
 		"AI_DEFAULT_PROVIDER": "anthropic",
 		"AI_DEFAULT_MODEL": "claude-sonnet-5-5",
+		// QA Reviewer (second opinion on marketing text): Gemini, secret GEMINI_API_KEY. Never gets private code.
+		"AI_REVIEW_PROVIDER": "google",
+		"AI_REVIEW_MODEL": "gemini-3.8-flash",
+
+		// AI team (owner request 2026-11-23): who does each job first, and who takes over at a limit.
+		// An AI at its limit rests until it resets (Gemini: midnight Pacific; rate limits: as the provider
+		// says; no credit / bad key: 6 h) and the next one continues. If all rest, the task resumes itself.
+		// openai:auto = the newest GPT "Sol" model this key can use (Codex family), found automatically.
+		// Writing, planning, Khmer copy: Claude → Codex → Gemini.
+		"AI_DEFAULT_CHAIN": "anthropic:claude-sonnet-5-5,openai:auto,google:gemini-3.8-flash",
+		// QA second opinion: Gemini → Codex → Claude (and never the AI that wrote the work).
+		"AI_REVIEW_CHAIN": "google:gemini-3.8-flash,openai:auto,anthropic:claude-sonnet-5-5",
 
 		// Paid AI lock. "true" = unlocked by the owner for Claude. When "false", only the free Gemini models
 		// below (and mock) can run. Only the owner should change this.
@@ -62,7 +74,7 @@
 		// validated in the Worker in every mode.
 		"GEMINI_SCHEMA_MODE": "json_schema",
 
-		// Runtime provider fallback is off (and a paid fallback is refused while paid AI is locked).
+		// Old single-AI fallback (only used when a job has no chain above). The AI chains handle switching.
 		"AI_FALLBACK_ENABLED": "false",
 
 		// Spending cap. 100,000 tokens/day on Claude Sonnet 5.5 is at most about $1/day even if every token

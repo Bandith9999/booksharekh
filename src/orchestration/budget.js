@@ -13,22 +13,26 @@ export const budgets = env => ({
 });
 const MIN_USEFUL = 500;
 
-export async function tokensUsed(env, taskId) {
+export async function tokensUsed(env, taskId, { paidOnly = false } = {}) {
   const t = await env.DB.prepare('SELECT COALESCE(SUM(input_tokens+output_tokens),0) used FROM agent_execution_logs WHERE task_id=?').bind(taskId).first();
-  const d = await env.DB.prepare("SELECT COALESCE(SUM(input_tokens+output_tokens),0) used, COUNT(*) calls FROM agent_execution_logs WHERE created_at >= date('now')").first();
+  // AI chains: daily caps protect paid spend, so free-tier Gemini calls are not counted (paid Gemini is).
+  const freeGoogle = paidOnly && env.GEMINI_PAID_TIER !== 'true' ? " AND provider <> 'google'" : '';
+  const d = await env.DB.prepare(`SELECT COALESCE(SUM(input_tokens+output_tokens),0) used, COUNT(*) calls FROM agent_execution_logs WHERE created_at >= date('now')${freeGoogle}`).first();
   const m = await env.DB.prepare("SELECT COUNT(*) calls FROM agent_execution_logs WHERE created_at > datetime('now','-1 minute')").first();
   return { task: Number(t.used), daily: Number(d.used), callsToday: Number(d.calls), callsLastMinute: Number(m.calls) };
 }
 
 // Returns the tokens still available for one call; throws when a limit is reached.
-export async function checkBudget(env, taskId) {
+// free: a free-tier route (Gemini free) is not counted against the daily caps, which protect paid spend.
+// paidOnly: (AI chains) count only paid calls toward the daily caps.
+export async function checkBudget(env, taskId, { free = false, paidOnly = false } = {}) {
   const limit = budgets(env);
-  const used = await tokensUsed(env, taskId);
-  if (used.callsToday >= limit.perDay) throw new AIError(`Daily AI request limit reached (${used.callsToday}/${limit.perDay})`, { kind: 'quota' });
-  if (used.daily + MIN_USEFUL > limit.daily) throw new AIError(`Daily token budget reached (${used.daily}/${limit.daily})`, { kind: 'quota' });
+  const used = await tokensUsed(env, taskId, { paidOnly });
+  if (!free && used.callsToday >= limit.perDay) throw new AIError(`Daily AI request limit reached (${used.callsToday}/${limit.perDay})`, { kind: 'quota' });
+  if (!free && used.daily + MIN_USEFUL > limit.daily) throw new AIError(`Daily token budget reached (${used.daily}/${limit.daily})`, { kind: 'quota' });
   if (used.task + MIN_USEFUL > limit.task) throw new AIError(`Task token budget reached (${used.task}/${limit.task})`, { kind: 'budget' });
   if (used.callsLastMinute >= limit.perMinute) throw new AIError(`AI request limit of ${limit.perMinute}/minute reached`, { kind: 'rate_limit', retryAfter: 60 });
-  return { remaining: Math.min(limit.task - used.task, limit.daily - used.daily) };
+  return { remaining: free ? limit.task - used.task : Math.min(limit.task - used.task, limit.daily - used.daily) };
 }
 
 export async function logExecution(env, e) {

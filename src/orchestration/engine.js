@@ -5,6 +5,7 @@ import { backoffSeconds, clamp, classifyTask } from '../helpers.js';
 import { audit, getAgentOverride, getAgentTask, getTask, listAgentTasks, listDependencies, newId } from '../db.js';
 import { DEMO_JOB_STEP, getAction, getAgent } from '../agents/registry.js';
 import { runAIAction } from '../agents/runner.js';
+import { appendQa, qaSkippedLine } from '../agents/qa.js';
 import { keyboards, notifyTaskOwner } from '../telegram.js';
 import { KM_ACTION, T, isKhmer } from '../i18n.js';
 import { decide, requestApproval, revokeOpenApprovals } from './approvals.js';
@@ -107,7 +108,9 @@ async function createMediaTask(env, { userId, input, type }) {
   await env.DB.prepare('INSERT INTO tasks (id,telegram_user_id,request_text,task_type,proposal,status) VALUES (?,?,?,?,?,?)')
     .bind(id, String(userId), clamp(`${m.label} for booksharekh.com — theme: ${input.theme}`, 2000), type, '(writing)', 'planning').run();
   const writeId = await insertStep(env, { taskId: id, agent: m.agent, action: m.write, status: 'queued', input });
-  await insertStep(env, { taskId: id, agent: m.agent, action: m.job, status: 'pending', dependsOn: [writeId] });
+  // Second opinion (QA Reviewer, Gemini by default) before the owner's approval; optional, never blocks.
+  const qaId = await insertStep(env, { taskId: id, agent: 'qa_reviewer', action: 'review_content', status: 'pending', dependsOn: [writeId] });
+  await insertStep(env, { taskId: id, agent: m.agent, action: m.job, status: 'pending', dependsOn: [qaId] });
   await audit(env, id, 'TASK_CREATED', userId, `${type} theme="${clamp(input.theme, 80)}" covers=${(input.covers || []).map(c => c.id).join(',')}`);
   try {
     await enqueueStep(env, writeId);
@@ -220,13 +223,24 @@ export async function runAgentTask(env, agentTaskId) {
     }
     return { ok: true };
   } catch (e) {
+    // Optional steps (QA second opinion) are skipped on any error instead of failing or pausing the task.
+    if (getAction(at.agent, at.action)?.optional) return skipOptionalStep(env, task, at, e);
     return handleStepError(env, task, at, e);
   }
 }
 
+async function skipOptionalStep(env, task, at, e) {
+  const reason = e?.kind === 'quota' ? 'quota' : e?.kind === 'config' ? 'not set up' : clamp(e?.message || 'error', 60);
+  if (!await transition(env.DB, 'agent_tasks', at.id, 'completed', { from: ['running'], set: { output: JSON.stringify({ skipped: reason }), error: clamp(e?.message, 300), finished_at: SQL_NOW } })) return { skipped: true };
+  await appendQa(env, task.id, qaSkippedLine(reason));
+  await audit(env, task.id, 'STEP_SKIPPED', 'worker', `${at.agent}.${at.action}: ${clamp(e?.message, 150)}`);
+  await advance(env, task.id);
+  return { ok: true, skipped: true };
+}
+
 async function handleStepError(env, task, at, e) {
   const message = e?.message || String(e);
-  if (e?.kind === 'quota') return pauseStep(env, task, at, message);
+  if (e?.kind === 'quota') return pauseStep(env, task, at, message, e.resumeAt);
   if (e?.retryable && at.attempts < at.max_attempts &&
       await transition(env.DB, 'agent_tasks', at.id, 'queued', { from: ['running'], set: { error: clamp(message, 500) } })) {
     await audit(env, task.id, 'STEP_RETRY', 'worker', `${at.agent}.${at.action} attempt ${at.attempts}/${at.max_attempts}: ${message}`);
@@ -253,13 +267,37 @@ const cancelOpenSteps = (env, taskId) => env.DB.prepare(`UPDATE agent_tasks SET 
     WHERE task_id=? AND status IN ('pending','awaiting_approval','queued','paused','revision_required')`).bind(taskId).run();
 
 // Daily quota or budget exhausted: stop and tell the owner. Never switch to another (paid) provider.
-async function pauseStep(env, task, at, message) {
+async function pauseStep(env, task, at, message, resumeAt = null) {
   await transition(env.DB, 'agent_tasks', at.id, 'paused', { from: ['running'], set: { error: clamp(message, 500) } });
   await transition(env.DB, 'tasks', task.id, 'paused', { set: { result_note: clamp(message, 500) } });
-  await audit(env, task.id, 'PAUSED', 'worker', `${at.agent}.${at.action}: ${message}`);
+  await audit(env, task.id, 'PAUSED', 'worker', `${at.agent}.${at.action}: ${message}${resumeAt ? ` (auto-resume ${new Date(resumeAt).toISOString()})` : ''}`);
   const ref = `${task.id.slice(0, 17)}…`;
+  if (resumeAt) {
+    // Every AI is resting: continue by itself when the first one is free again (cron, every 2 minutes).
+    await env.DB.prepare(`INSERT INTO settings (key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`).bind(`auto_resume:${task.id}`, String(resumeAt)).run();
+    // Short waits stay quiet; long ones tell the owner when work continues.
+    if (resumeAt - Date.now() > 10 * 60000) await notify(env, task, T.pausedAuto(env, resumeAt, ref));
+    return { paused: true, resumeAt };
+  }
   await notify(env, task, T.paused(env, task, clamp(message, 300), ref));
   return { paused: true };
+}
+
+// Cron: resume tasks whose AIs are free again.
+export async function autoResume(env, now = Date.now()) {
+  const rows = (await env.DB.prepare("SELECT key, value FROM settings WHERE key LIKE 'auto_resume:%'").all()).results || [];
+  let resumed = 0;
+  for (const r of rows) {
+    if (Number(r.value) > now) continue;
+    const taskId = r.key.slice('auto_resume:'.length);
+    await env.DB.prepare('DELETE FROM settings WHERE key=?').bind(r.key).run();
+    const task = await getTask(env, taskId);
+    if (task?.status !== 'paused') continue;
+    const res = await resumeTask(env, taskId, task.telegram_user_id);
+    if (res.ok) { resumed++; await audit(env, taskId, 'AUTO_RESUMED', 'system', 'AI limits reset'); }
+  }
+  return { resumed };
 }
 
 export async function resumeTask(env, taskId, userId) {

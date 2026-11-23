@@ -108,6 +108,13 @@ def main():
     except Exception as exc:
         try:
             api('/job-result',{'task_id':task_id,'status':'failed','run_url':url,'note':str(exc)[:300]})
+        except urllib.error.HTTPError as callback_exc:
+            # 409: the Worker already recorded this task as finished (e.g. our "completed" report arrived
+            # but its reply was lost). The work is done, so this run is not a failure.
+            if callback_exc.code==409:
+                print('Task already finished in the Worker; not failing the run. Earlier error:',exc)
+                return
+            print('Could not report failure:',callback_exc)
         except Exception as callback_exc:
             print('Could not report failure:',callback_exc)
         raise
