@@ -3,6 +3,7 @@
 import { reply } from './telegram.js';
 import { T, KM_ACTION, isKhmer } from './i18n.js';
 import { members } from './website/users.js';
+import { purchaseLines } from './website/purchases.js';
 import { renderPlan } from './agents/manager.js';
 
 const inert = (...labels) => ({ inline_keyboard: [labels.map(text => ({ text, callback_data: 'noop' }))] });
@@ -20,6 +21,7 @@ export function sampleAlerts(env) {
     ['Top-up rejected', T.topupRejected(env, t.id)],
     ['Top-up already decided', T.topupProblem(env, t.id, 'This top-up has already been approved.')],
     ['New member', T.userActivity(env, members(reg), '230')],
+    ['Book purchase', T.purchaseAlert(env, purchaseLines([{ email: 'lyly@example.com', user: 'Lyly.Hong', book_title: 'Pride and Prejudice' }]))],
     ['/users', T.usersSummary(env, '230', '2', '5')],
     ['Book request', T.requestAlert(env, { id: 45, book_title: 'Pride and Prejudice', author: 'Jane Austen', language: 'English' }), inert(rb.find, rb.reject)],
     ['/develop plan approval', T.approval(env, task, plan, km ? KM_ACTION.dispatch_code_change : 'Run the Laravel Developer (opens a pull request)', 24), inert(ab.approve, ab.reject, ab.cancel)],

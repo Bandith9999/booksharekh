@@ -12,6 +12,7 @@ import { handleQueueBatch } from './orchestration/queue-consumer.js';
 import { pollBookRequests } from './books/requests.js';
 import { pollTopups } from './website/topups.js';
 import { pollUsers } from './website/users.js';
+import { pollPurchases } from './website/purchases.js';
 import { pollRecommend } from './marketing/recommend.js';
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -171,6 +172,7 @@ export default {
   async scheduled(event, env) {
     try { await pollTopups(env); } catch (e) { console.error('top-up poll failed', String(e)); }
     try { await pollUsers(env); } catch (e) { console.error('user activity poll failed', String(e)); }
+    try { await pollPurchases(env); } catch (e) { console.error('purchase poll failed', String(e)); }
     try { await pollRecommend(env, new Date(event?.scheduledTime || Date.now())); } catch (e) { console.error('book recommendations failed', String(e)); }
     try { await pollBookRequests(env); } catch (e) { console.error('book request poll failed', String(e)); }
   },

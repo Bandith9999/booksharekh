@@ -72,7 +72,9 @@ export const updateRequest = (env, id, body) => call(env, 'PATCH', `/api/ai/requ
 export const listTopups = (env, afterId = 0, pendingOnly = false) =>
   get(env, '/api/ai/topups', { after_id: Number(afterId) || 0, ...(pendingOnly ? { status: 'pending' } : {}) });
 // Sign-ups/sign-ins since a site-time timestamp (or the last N hours) + total users (ability users:read).
-export const userActivity = (env, since) => get(env, '/api/ai/users/activity', typeof since === 'number' ? { hours: since } : { since });
+// Book purchases after an id (ability users:read): buyer email, user name, book title.
+export const listPurchases = (env, afterId = 0) => get(env, '/api/ai/purchases', { after_id: Number(afterId) || 0 });
+export const userActivity =(env, since) => get(env, '/api/ai/users/activity', typeof since === 'number' ? { hours: since } : { since });
 export const topupImage =(env, id) => call(env, 'GET', `/api/ai/topups/${Number(id)}/image`, { raw: true, timeout: 20000 });
 export const approveTopup = (env, id, body) => call(env, 'POST', `/api/ai/topups/${Number(id)}/approve`, { json: body });
 export const rejectTopup = (env, id, body) => call(env, 'POST', `/api/ai/topups/${Number(id)}/reject`, { json: body });

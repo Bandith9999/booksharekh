@@ -76,8 +76,8 @@ test('/preview sends a sample of every alert with inert buttons, owner only', as
   const calls = mockFetch([[/api\.telegram\.org/, () => Response.json({ ok: true, result: {} })]]);
   await telegram(e, msg('/preview'));
   const msgs = sent(calls);
-  assert.equal(msgs.length, 12, 'intro + 11 samples');
-  assert.match(msgs[0].text, /^🧪 Preview: 11 sample alerts/);
+  assert.equal(msgs.length, 13, 'intro + 12 samples');
+  assert.match(msgs[0].text, /^🧪 Preview: 12 sample alerts/);
   assert.match(msgs[1].text, /^\*\*\* បញ្ចូលប្រាក់ \*\*\*/);
   assert.match(msgs[5].text, /^\*\*\* សមាជិកថ្មី \*\*\*\n🆕 lyly@example\.com · Lyly\.Hong/);
   const buttons = msgs.flatMap(m => m.reply_markup?.inline_keyboard.flat() ?? []);
@@ -86,4 +86,25 @@ test('/preview sends a sample of every alert with inert buttons, owner only', as
   const before = sent(calls).length;
   await telegram(e, msg('/preview', 999));
   assert.equal(sent(calls).length, before, 'other users get nothing');
+});
+
+test('book purchases: silent alert with buyer email, user name and book title; first run starts quietly', async () => {
+  const e = env();
+  const rows = [{ id: 7, email: 'old@example.com', user: 'old', book_title: 'Old Book' }];
+  const calls = mockFetch([[/api\.telegram\.org/, () => Response.json({ ok: true, result: {} })],
+    [/\/api\/ai\/purchases/, url => {
+      const after = Number(new URL(url).searchParams.get('after_id'));
+      return Response.json({ data: rows.filter(r => r.id > after), latest_id: Math.max(...rows.map(r => r.id)) });
+    }],
+    [/\/api\/ai\/(users|topups|requests)/, () => Response.json({ data: [], latest_id: 0, now: '2026-11-23 10:00:00', total_users: 1, registered: [], logins: [] })]]);
+  await worker.scheduled({}, e, {});
+  assert.ok(!sent(calls).some(m => /ទិញសៀវភៅ|Old Book/.test(m.text)), 'old purchases are not alerted');
+  rows.push({ id: 8, email: 'reader1@example.com', user: 'reader1', book_title: 'Emma' }, { id: 9, email: null, user: 'reader2', book_title: 'Dracula' });
+  await worker.scheduled({}, e, {});
+  const m = sent(calls).at(-1);
+  assert.equal(m.text, '*** ទិញសៀវភៅ ***\n🛒 reader1@example.com · reader1\n📖 Emma\n\n🛒 reader2\n📖 Dracula');
+  assert.equal(m.disable_notification, true, 'silent');
+  const before = sent(calls).length;
+  await worker.scheduled({}, e, {});
+  assert.equal(sent(calls).length, before, 'each purchase alerted once');
 });
