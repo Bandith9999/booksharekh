@@ -194,7 +194,7 @@ test('/poster: website poster text → approve → PNG file + caption in Telegra
   assert.equal(lastText(calls), '🖼 កំពុងសរសេរអត្ថបទ poster…');
   await drain(e);
   const approval = sent(calls).at(-1);
-  assert.equal(approval.text, '🖼 Poster [DEMO]\n「អានសៀវភៅល្អៗ គ្រប់ពេល」\nសៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ\n✓ តម្លៃ $0.50\n✓ បញ្ចូលលុយតាម KHQR\n[ ចូលមើលឥឡូវនេះ ]\n\n🔎 QA (mock): ✅ ល្អ\n\n👉 បង្កើត poster?');
+  assert.equal(approval.text, '🖼 Poster [DEMO]\n📚 Emma · Dracula · Ulysses · New Book\n「អានសៀវភៅល្អៗ គ្រប់ពេល」\nសៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ\n✓ តម្លៃ $0.50\n✓ បញ្ចូលលុយតាម KHQR\n[ ចូលមើលឥឡូវនេះ ]\n\n🔎 QA (mock): ✅ ល្អ\n\n👉 បង្កើត poster?');
   const task = latestTask(e);
   assert.equal(task.task_type, 'poster');
   const qaStep = e.DB.db.prepare("SELECT agent, status FROM agent_tasks WHERE task_id=? AND action='review_content'").get(task.id);
@@ -214,7 +214,7 @@ test('/poster: website poster text → approve → PNG file + caption in Telegra
   assert.equal((await runner(2)).status, 409, 'a runner without the poster renderer gets nothing');
   const got = await (await runner(3)).json();
   assert.deepEqual(got.posters[0], { headline: 'អានសៀវភៅល្អៗ គ្រប់ពេល', subline: 'សៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ',
-    points: ['តម្លៃ $0.50', 'បញ្ចូលលុយតាម KHQR'], cta: 'ចូលមើលឥឡូវនេះ', covers: [`${SITE}/covers/1.jpg`, `${SITE}/covers/2.jpg`, `${SITE}/covers/3.jpg`], background_url: null, logo_url: null });
+    points: ['តម្លៃ $0.50', 'បញ្ចូលលុយតាម KHQR'], cta: 'ចូលមើលឥឡូវនេះ', covers: [`${SITE}/covers/1.jpg`, `${SITE}/covers/2.jpg`, `${SITE}/covers/4.jpg`, `${SITE}/covers/3.jpg`], background_url: null, logo_url: null });
 
   const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
   const up = (path) => worker.fetch(new Request(`https://w.example${path}`, { method: 'POST', headers: { Authorization: 'Bearer cb-secret', 'content-type': 'image/png' }, body: png }), e);
@@ -230,7 +230,7 @@ test('/poster: website poster text → approve → PNG file + caption in Telegra
 
 test('QA by Gemini: issues are shown in the approval; if Gemini is not set up, QA is skipped and the approval still comes', async () => {
   // Real routing: Claude writes, Gemini reviews. No GEMINI_API_KEY → QA skipped, never blocks.
-  const claudePoster = { title: 'Poster', background: 'none', headline: 'អានសៀវភៅ', subline: 'សៀវភៅច្រើន', points: ['តម្លៃ $0.50', 'KHQR'], cta: 'ចូលមើល', caption: 'x\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#a', '#b'] };
+  const claudePoster = { title: 'Poster', background: 'none', cover_ids: [2, 3, 1], headline: 'អានសៀវភៅ', subline: 'សៀវភៅច្រើន', points: ['តម្លៃ $0.50', 'KHQR'], cta: 'ចូលមើល', caption: 'x\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#a', '#b'] };
   const anthropic = [/api\.anthropic\.com\/v1\/messages$/, () => Response.json({ model: 'claude-sonnet-5-5', stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 10 }, content: [{ type: 'text', text: JSON.stringify(claudePoster) }] })];
   const base = { AI_PAID_ENABLED: 'true', AI_PROVIDER: 'anthropic', AI_MODEL: 'claude-sonnet-5-5', ANTHROPIC_API_KEY: 'sk-ant-x', AI_REVIEW_PROVIDER: 'google', AI_REVIEW_MODEL: 'gemini-3.8-flash' };
 
@@ -312,4 +312,35 @@ test('before the website has /api/ai/media, the logo and library photo are offer
   const e = env();
   mockFetch([[/\/api\/ai\/media$/, () => new Response('nf', { status: 404 })]]);
   assert.deepEqual((await siteMedia(e)).map(m => m.url), [`${SITE}/dist/img/logo/logo.png`, `${SITE}/dist/img/library-bg.jpg`]);
+});
+
+test('poster covers: the AI picks real covers only; used covers are remembered so the next poster shows other books', async () => {
+  const { chosenCovers, posterCandidates, POSTER_COVERS, POSTER_COVER_DAYS } = await import('../src/marketing/poster.js');
+  const { markPromoted } = await import('../src/marketing/promo.js');
+  const cands = [1, 2, 3, 4].map(id => ({ id, cover_url: `${SITE}/c/${id}.jpg`, title: `B${id}` }));
+  assert.deepEqual(chosenCovers(cands, [3, 99, 3, 1]).map(c => c.id), [3, 1, 2], 'unknown ids and repeats dropped, filled to 3');
+  const e = env();
+  mockFetch([promoSite()]);
+  assert.deepEqual((await posterCandidates(e)).map(c => c.id), [1, 2, 4, 3]);
+  await markPromoted(e, [1, 2], POSTER_COVERS, POSTER_COVER_DAYS);
+  assert.deepEqual((await posterCandidates(e)).map(c => c.id), [4, 3, 1, 2], 'books already on a poster go last');
+});
+
+test('the GitHub job gets only this task\'s approved images, through the bot and the site API', async () => {
+  const e = env();
+  const calls = mockFetch([tgOk, routes.dispatchOk, promoSite(),
+    [/\/api\/ai\/media\/file\?path=covers%2F1\.jpg$/, () => new Response(new Uint8Array([255, 216, 255]), { headers: { 'content-type': 'image/jpeg' } })]]);
+  await telegram(e, msg('/poster'));
+  await drain(e);
+  await telegram(e, press(approveButton(calls)));
+  await drain(e);
+  const t = latestTask(e);
+  const get = (url, secret = 'cb-secret') => worker.fetch(new Request(`https://w.example/job-asset/${t.id}?url=${encodeURIComponent(url)}`, { headers: { Authorization: `Bearer ${secret}` } }), e);
+  assert.equal((await get(`${SITE}/covers/1.jpg`, 'wrong')).status, 401);
+  assert.equal((await get(`${SITE}/.env`)).status, 403, 'not an approved image');
+  assert.equal((await get('https://evil.example/x.jpg')).status, 403);
+  const ok = await get(`${SITE}/covers/1.jpg`);
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get('content-type'), 'image/jpeg');
+  assert.deepEqual([...new Uint8Array(await ok.arrayBuffer())], [255, 216, 255]);
 });

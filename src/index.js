@@ -3,8 +3,9 @@
 import { clamp, safeTaskId } from './helpers.js';
 import { addArtifact, audit } from './db.js';
 import { reply, tgForm } from './telegram.js';
+import { apiConfigured, mediaFile } from './website/laravel-api.js';
 import { markPromoted, promoOf } from './marketing/promo.js';
-import { posterOf } from './marketing/poster.js';
+import { POSTER_COVERS, POSTER_COVER_DAYS, posterOf } from './marketing/poster.js';
 import { T } from './i18n.js';
 import { advance, autoResume } from './orchestration/engine.js';
 import { deployShaOf, prReviewText } from './orchestration/github.js';
@@ -64,6 +65,28 @@ async function getJob(env, id, request) {
   return json(job);
 }
 
+// The video/poster job (GitHub servers, blocked by the site's firewall) gets its approved images here.
+// Only images named in this task's approved artifact; fetched through the site's AI API, or directly.
+const MAX_ASSET_BYTES = 8 * 1024 * 1024;
+async function jobAsset(env, taskId, url) {
+  const task = await env.DB.prepare('SELECT task_type, status FROM tasks WHERE id=?').bind(taskId).first();
+  if (!task || !['book_promo', 'poster'].includes(task.task_type) || !['running', 'dispatching', 'queued'].includes(task.status)) return json({ error: 'not a running media task' }, 409);
+  const a = task.task_type === 'poster' ? (await posterOf(env, taskId))?.posters?.[0] : (await promoOf(env, taskId))?.videos?.[0];
+  const allowed = new Set([...(a?.covers || []), a?.background?.url, a?.logo_url].filter(Boolean));
+  if (!allowed.has(url)) return json({ error: 'not an approved image' }, 403);
+  const path = new URL(url).pathname.replace(/^\/+/, '');
+  let r = null;
+  if (apiConfigured(env)) r = await mediaFile(env, path).catch(() => null);
+  if (!r?.ok || !/^image\//.test(r.headers.get('content-type') || '')) {
+    r = await fetch(url, { headers: { 'User-Agent': 'BookShareKH-AI-Manager' }, signal: AbortSignal.timeout(20000) }).catch(() => null);
+  }
+  const type = r?.headers.get('content-type') || '';
+  if (!r?.ok || !/^image\/(png|jpe?g|webp|gif)/.test(type)) return json({ error: 'image not available' }, 502);
+  const bytes = await r.arrayBuffer();
+  if (!bytes.byteLength || bytes.byteLength > MAX_ASSET_BYTES) return json({ error: 'image too large' }, 502);
+  return new Response(bytes, { headers: { 'content-type': type.split(';')[0], 'cache-control': 'no-store' } });
+}
+
 // Media jobs upload the finished file; the Worker forwards it to the owner with its caption.
 // book_promo: MP4 video (sendVideo). poster: PNG sent as a file (sendDocument) so it keeps full quality.
 const MEDIA_OUT = {
@@ -98,7 +121,9 @@ async function receiveMedia(request, env, taskId, index, type) {
     await env.DB.prepare('DELETE FROM settings WHERE key=?').bind(key).run();
     throw e;
   }
-  await markPromoted(env, v.cover_ids || []);
+  // Remember the covers used: posters 30 days (so posters show different books), videos 7 days.
+  if (type === 'poster') await markPromoted(env, v.cover_ids || [], POSTER_COVERS, POSTER_COVER_DAYS);
+  else await markPromoted(env, v.cover_ids || []);
   await audit(env, taskId, type === 'poster' ? 'POSTER_SENT' : 'PROMO_VIDEO_SENT', 'github-actions', `${clamp(v.title, 80)} ${bytes.byteLength} bytes`);
   return json({ ok: true });
 }
@@ -167,6 +192,11 @@ export default {
     try {
       if (request.method === 'GET' && u.pathname === '/health') return json({ ok: true, service: 'booksharekh-ai-manager' });
       if (request.method === 'POST' && u.pathname === '/telegram') return await telegramWebhook(request, env);
+      const am = /^\/job-asset\/([^/]+)$/.exec(u.pathname);
+      if (am && request.method === 'GET') {
+        if (!authorizedJob(request, env)) return json({ error: 'unauthorized' }, 401);
+        return safeTaskId(am[1]) ? await jobAsset(env, am[1], String(u.searchParams.get('url') || '')) : json({ error: 'bad id' }, 400);
+      }
       const vm = /^\/job-(video|image)\/([^/]+)\/(\d)$/.exec(u.pathname);
       if (vm && request.method === 'POST') {
         if (!authorizedJob(request, env)) return json({ error: 'unauthorized' }, 401);

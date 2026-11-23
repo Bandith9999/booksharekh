@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fetchImage } from './fetch_image.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const FONTS = join(ROOT, 'assets', 'fonts');
@@ -65,13 +66,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 // ---- media ----
 async function downloadCover(url, file) {
-  if (!/^https:\/\//.test(url || '')) return false;
+  const img = await fetchImage(url); // through the AI Manager on the GitHub runner (site firewall)
+  if (!img) return false;
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'BookShareKH-GitHub-Runner/1.0' }, signal: AbortSignal.timeout(25000) });
-    if (!r.ok) return false;
-    const buf = Buffer.from(await r.arrayBuffer());
-    if (!buf.length || buf.length > 8 * 1024 * 1024) return false;
-    writeFileSync(file, buf);
+    writeFileSync(file, img.bytes);
     run(FFPROBE, ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', file], 30000);
     return true;
   } catch { return false; }
