@@ -1,0 +1,235 @@
+// Approved GitHub Actions job execution. Exactly one workflow dispatch per approval.
+import { clamp, githubHint, sha256Hex } from '../helpers.js';
+import { audit, latestArtifact, newId } from '../db.js';
+import { notifyTaskOwner } from '../telegram.js';
+import { consumeApproval, consumeStepApproval, finishApproval, releaseApproval } from './approvals.js';
+import { transition } from './state-machine.js';
+import { T, isKhmer } from '../i18n.js';
+
+const HTTP_TIMEOUT_MS = 15000;
+
+// Workflows the Worker may dispatch. Code-defined: the AI cannot add one.
+export const WORKFLOWS = {
+  // Demo report/video job in this repository.
+  demo: { file: 'worker-job.yml', repo: env => env.GITHUB_REPO, label: 'demo job', repoSetting: 'GITHUB_REPO' },
+  // Laravel Developer in the private website repository: branch, edit, test, open a pull request. Never deploys.
+  website_dev: { file: 'laravel-developer.yml', repo: env => env.WEBSITE_REPO, label: 'Laravel Developer job', repoSetting: 'WEBSITE_REPO' },
+  // Deploy an approved commit to booksharekh.com over SSH (changed files, backup, health check, rollback).
+  website_deploy: { file: 'deploy.yml', repo: env => env.WEBSITE_REPO, label: 'Deploy', repoSetting: 'WEBSITE_REPO' },
+};
+
+// The commit a deploy step will publish (set when the step is created, or after the merge).
+export const deployShaOf = step => { try { const sha = JSON.parse(step?.input || '{}').sha; return /^[0-9a-f]{40}$/.test(sha || '') ? sha : null; } catch { return null; } };
+export const WORKFLOW_FILE = WORKFLOWS.demo.file;
+const workflowOf = action => WORKFLOWS[action?.workflow || 'demo'];
+
+export class JobError extends Error {
+  constructor(message, { retryable = false, unknown = false } = {}) { super(message); this.retryable = retryable; this.unknown = unknown; }
+}
+
+export function githubHeaders(env) {
+  return { Authorization: `Bearer ${String(env.GITHUB_TOKEN || '').trim()}`, Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'booksharekh-cloudflare-manager' };
+}
+export const workflowUrl = (env, wf = WORKFLOWS.demo) =>
+  `https://api.github.com/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(wf.repo(env) || '')}/actions/workflows/${wf.file}`;
+
+// The exact action the owner approves. Any change to the request, plan, repo or workflow changes the hash.
+export async function jobPayload(env, task, action = null, step = null) {
+  const wf = workflowOf(action);
+  // Promo videos bind to the exact AI-written lines and captions the owner saw.
+  const plan = await latestArtifact(env, task.id, task.task_type === 'book_promo' ? 'promo' : 'plan');
+  const inputs = { task_id: task.id };
+  if (wf === WORKFLOWS.website_deploy) {
+    inputs.sha = deployShaOf(step);
+    if (!inputs.sha) throw new JobError('No commit to deploy yet');
+  }
+  return {
+    action: action?.approvalAction || 'dispatch_github_job', repo: `${env.GITHUB_OWNER}/${wf.repo(env)}`, workflow: wf.file, ref: 'main',
+    inputs, task_type: task.task_type,
+    request_sha256: await sha256Hex(task.request_text), plan_sha256: await sha256Hex(plan?.content ?? task.proposal),
+  };
+}
+
+export async function dispatchWorkflow(env, taskId, wf = WORKFLOWS.demo, extraInputs = {}) {
+  if (!env.GITHUB_TOKEN || !env.GITHUB_OWNER) throw new JobError('GitHub Actions secrets/settings not configured');
+  if (!wf.repo(env)) throw new JobError(`${wf.label}: repository not configured (set ${wf.repoSetting} in wrangler.jsonc).`);
+  let r;
+  try {
+    r = await fetch(`${workflowUrl(env, wf)}/dispatches`, { method: 'POST', headers: { ...githubHeaders(env), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ref: 'main', inputs: { task_id: taskId, ...extraInputs } }), signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+  } catch (e) {
+    // We cannot tell whether GitHub accepted it, so never dispatch again automatically.
+    throw new JobError(`GitHub dispatch outcome unknown (${e?.name === 'TimeoutError' ? 'timeout' : 'network error'}). Check GitHub Actions before creating a new task.`, { unknown: true });
+  }
+  if (r.status === 204) return;
+  const detail = (await r.json().catch(() => null))?.message || '';
+  throw new JobError(`GitHub dispatch HTTP ${r.status}: ${clamp(detail, 120)}. ${githubHint(r.status)}`, { retryable: r.status >= 500 });
+}
+
+// Executes an approved GitHub job step. The step stays 'running' until /job-result arrives.
+export async function runGithubJob(env, task, agentTask, action = null) {
+  const wf = workflowOf(action);
+  const approval = await env.DB.prepare(`SELECT * FROM task_approvals WHERE agent_task_id=? AND status IN ('approved','executing')
+      ORDER BY requested_at DESC LIMIT 1`).bind(agentTask.id).first();
+  if (!approval) throw new JobError('No valid owner approval for this step');
+  if (approval.status === 'approved') {
+    const c = await consumeApproval(env, approval.id, await jobPayload(env, task, action, agentTask));
+    if (!c.ok) throw new JobError(c.reason === 'payload_changed'
+      ? 'The task changed after it was approved, so the approval no longer applies. Create a new task.'
+      : `Approval cannot be used (${c.reason}).`);
+  }
+  const claim = await env.DB.prepare(`INSERT INTO workflow_runs (id,task_id,agent_task_id,approval_id,workflow,status) VALUES (?,?,?,?,?,'dispatching')
+      ON CONFLICT(approval_id) DO UPDATE SET status='dispatching', attempts=attempts+1, error=NULL, updated_at=CURRENT_TIMESTAMP
+      WHERE workflow_runs.status='failed'`).bind(newId('WR'), task.id, agentTask.id, approval.id, wf.file).run();
+  if (claim.meta?.changes !== 1) {
+    const run = await env.DB.prepare('SELECT status FROM workflow_runs WHERE approval_id=?').bind(approval.id).first();
+    if (['dispatched', 'completed'].includes(run?.status)) return; // redelivered after success: wait for the callback
+    await env.DB.prepare("UPDATE workflow_runs SET status='unknown', updated_at=CURRENT_TIMESTAMP WHERE approval_id=? AND status='dispatching'").bind(approval.id).run();
+    throw new JobError('An earlier dispatch attempt was interrupted and may have started a run. Check GitHub Actions before creating a new task.', { unknown: true });
+  }
+  try {
+    await dispatchWorkflow(env, task.id, wf, wf === WORKFLOWS.website_deploy ? { sha: deployShaOf(agentTask) } : {});
+  } catch (e) {
+    await env.DB.prepare('UPDATE workflow_runs SET status=?, error=?, updated_at=CURRENT_TIMESTAMP WHERE approval_id=?')
+      .bind(e.unknown ? 'unknown' : 'failed', clamp(e.message, 500), approval.id).run();
+    if (e.retryable) await releaseApproval(env, approval.id); else await finishApproval(env, approval.id, false);
+    throw e;
+  }
+  await env.DB.prepare("UPDATE workflow_runs SET status='dispatched', updated_at=CURRENT_TIMESTAMP WHERE approval_id=?").bind(approval.id).run();
+  await finishApproval(env, approval.id, true);
+  // Keep the step leased while GitHub runs (job timeouts are well under this).
+  await env.DB.prepare("UPDATE agent_tasks SET lease_until=datetime('now','+3 hours') WHERE id=?").bind(agentTask.id).run();
+  await transition(env.DB, 'tasks', task.id, 'running');
+  await audit(env, task.id, 'DISPATCHED', 'worker', `${wf.repo(env)}/${wf.file} approval=${approval.id}`);
+  // No "started" message: the approval reply already says it is running (one message, not two).
+}
+
+// ---------- Merging an approved Laravel Developer pull request ----------
+const websiteApi = env => `https://api.github.com/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(env.WEBSITE_REPO || '')}`;
+export const prNumberFromUrl = url => Number(String(url || '').match(/\/pull\/(\d+)$/)?.[1]) || null;
+
+async function codeChangeOutput(env, taskId) {
+  const row = await env.DB.prepare("SELECT output FROM agent_tasks WHERE task_id=? AND action='code_change_job' AND status='completed'").bind(taskId).first();
+  let out = null; try { out = JSON.parse(row?.output || 'null'); } catch { /* ignore */ }
+  if (!out?.pr_url || !/^[0-9a-f]{40}$/.test(out.head_sha || '')) throw new JobError('The pull request is not ready');
+  return out;
+}
+
+// What the owner approves: merge exactly this commit of this PR.
+export async function mergePayload(env, task) {
+  const out = await codeChangeOutput(env, task.id);
+  return { action: 'merge_pull_request', repo: `${env.GITHUB_OWNER}/${env.WEBSITE_REPO}`, pr_number: prNumberFromUrl(out.pr_url), head_sha: out.head_sha };
+}
+
+// Telegram review text: changed files and the first changed lines, so the owner can decide without GitHub.
+export async function prReviewText(env, prUrl, headSha, note) {
+  const n = prNumberFromUrl(prUrl);
+  if (isKhmer(env)) return prReviewShortKm(env, n);
+  const L = T.prReview(env);
+  const lines = [L.ready(n, prUrl), `Commit ${headSha.slice(0, 12)} · ${clamp(note, 150)}`];
+  try {
+    const r = await fetch(`${websiteApi(env)}/pulls/${n}/files?per_page=30`, { headers: githubHeaders(env), signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+    const files = r.ok ? await r.json() : [];
+    if (!files.length) throw new Error('no files');
+    lines.push('', L.files(files.length), ...files.slice(0, 10).map(f => `• ${f.filename} (+${f.additions} −${f.deletions})`));
+    const changed = files.flatMap(f => String(f.patch || '').split('\n').filter(l => /^[+-](?![+-])/.test(l)).map(l => clamp(l.replace(/\s+/g, ' '), 110)));
+    lines.push('', L.changes, ...changed.slice(0, 20));
+    if (changed.length > 20) lines.push(L.more(changed.length - 20));
+  } catch { lines.push('', L.noDiff); }
+  lines.push('', L.checks);
+  return lines.join('\n');
+}
+
+export async function runGithubMerge(env, task, agentTask) {
+  const payload = await mergePayload(env, task);
+  const approval = await consumeStepApproval(env, agentTask.id, payload);
+  try {
+    let r;
+    try {
+      r = await fetch(`${websiteApi(env)}/pulls/${payload.pr_number}/merge`, {
+        method: 'PUT', headers: { ...githubHeaders(env), 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+        body: JSON.stringify({ sha: payload.head_sha, merge_method: 'squash', commit_title: `${clamp(task.request_text, 60)} (#${payload.pr_number})` }),
+      });
+    } catch { throw new JobError('GitHub merge outcome unknown (network). Check the pull request before retrying.'); }
+    const body = await r.json().catch(() => ({}));
+    if (r.status === 409) throw new JobError('The pull request changed after your approval, so it was not merged.');
+    if (r.status === 405) throw new JobError(`GitHub says the pull request cannot be merged: ${clamp(body.message, 120)}`);
+    if (r.status === 403 || r.status === 404) throw new JobError(`GitHub refused the merge (HTTP ${r.status}). Give the token Contents: Read and write and Pull requests: Read and write on ${env.WEBSITE_REPO}.`);
+    if (!r.ok || !body.merged) throw new JobError(`GitHub merge failed (HTTP ${r.status}): ${clamp(body.message, 120)}`, { retryable: r.status >= 500 });
+    await finishApproval(env, approval.id, true);
+    await audit(env, task.id, 'PR_MERGED', 'worker', `#${payload.pr_number} ${payload.head_sha} -> ${body.sha}`);
+    // If a deploy step follows, it carries the merged commit and its approval message says it was merged.
+    const deployStep = await env.DB.prepare("SELECT id FROM agent_tasks WHERE task_id=? AND action='deploy_job' AND status='pending'").bind(task.id).first();
+    if (deployStep) {
+      await env.DB.prepare('UPDATE agent_tasks SET input=? WHERE id=?').bind(JSON.stringify({ sha: body.sha }), deployStep.id).run();
+      await env.DB.prepare('UPDATE tasks SET proposal=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
+        .bind(await deployPreviewText(env, body.sha, T.merged(env, payload.pr_number, String(body.sha).slice(0, 12))), task.id).run();
+    } else {
+      await notifyTaskOwner(env, task, T.merged(env, payload.pr_number, String(body.sha).slice(0, 12))).catch(() => {});
+    }
+    return { merged_sha: body.sha, pr_number: payload.pr_number };
+  } catch (e) {
+    if (e?.retryable) await releaseApproval(env, approval.id); else await finishApproval(env, approval.id, false);
+    throw e;
+  }
+}
+
+export async function closePullRequest(env, taskId) {
+  const out = await codeChangeOutput(env, taskId).catch(() => null);
+  const n = prNumberFromUrl(out?.pr_url);
+  if (!n) return false;
+  const r = await fetch(`${websiteApi(env)}/pulls/${n}`, { method: 'PATCH', headers: { ...githubHeaders(env), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ state: 'closed' }), signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) }).catch(() => null);
+  return Boolean(r?.ok);
+}
+
+// What a deploy will change on the live site: files between the last deployed commit and this one.
+export async function deployPreviewText(env, sha, header = '') {
+  const last = await env.DB.prepare("SELECT value FROM settings WHERE key='last_deployed_sha'").first().catch(() => null);
+  const base = last?.value || 'd56611b'; // the cPanel export the repository started from
+  if (isKhmer(env)) return deployPreviewShortKm(env, base, sha, header);
+  const lines = header ? [header, ''] : [];
+  lines.push(T.deployHead(env, sha.slice(0, 12)));
+  try {
+    const r = await fetch(`${websiteApi(env)}/compare/${base}...${sha}`, { headers: githubHeaders(env), signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+    const files = r.ok ? ((await r.json()).files || []).map(x => x.filename)
+      .filter(n => !/^(\.github\/|tests\/|website-kit\/|storage\/|vendor\/)|\.md$/.test(n)) : null;
+    if (files) lines.push(T.deployFiles(env, files.length), ...files.slice(0, 12).map(n => `• ${n}`), ...(files.length > 12 ? [`… +${files.length - 12}`] : []));
+  } catch { /* preview is best effort; the deploy job computes the exact list */ }
+  return clamp(lines.join('\n'), 3000);
+}
+
+// ---- Minimal Khmer previews ----
+const SERVER_FILE = n => !/^(\.github\/|tests\/|website-kit\/|storage\/|vendor\/)|\.md$/.test(n);
+async function prReviewShortKm(env, n) {
+  const lines = [`🔍 PR #${n}`];
+  try {
+    const r = await fetch(`${websiteApi(env)}/pulls/${n}/files?per_page=30`, { headers: githubHeaders(env), signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+    const files = r.ok ? await r.json() : [];
+    lines[0] += ` · ${files.length} ឯកសារ · ✅ tests`;
+    // Changed text only, each distinct line once, HTML/Blade tags removed, short.
+    const seen = new Set();
+    for (const f of files) {
+      for (const l of String(f.patch || '').split('\n')) {
+        if (!/^[+-](?![+-])/.test(l)) continue;
+        const body = l.slice(1).replace(/<[^>]*>|\{\{[^}]*\}\}/g, ' ').replace(/\s+/g, ' ').trim();
+        if (body) seen.add(`${l[0]} ${clamp(body, 60)}`);
+      }
+    }
+    lines.push(...[...seen].slice(0, 6));
+  } catch { /* keep the header only */ }
+  return lines.join('\n');
+}
+async function deployPreviewShortKm(env, base, sha, header) {
+  let files = [];
+  try {
+    const r = await fetch(`${websiteApi(env)}/compare/${base}...${sha}`, { headers: githubHeaders(env), signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+    files = r.ok ? ((await r.json()).files || []).map(x => x.filename).filter(SERVER_FILE) : [];
+  } catch { /* best effort */ }
+  const lines = [];
+  if (header) lines.push(header.split('\n')[0]);
+  lines.push(`🚀 ${files.length} ឯកសារ`, ...files.slice(0, 5).map(p => `• ${p.split('/').pop()}`));
+  if (files.length > 5) lines.push(`… +${files.length - 5}`);
+  return lines.join('\n');
+}

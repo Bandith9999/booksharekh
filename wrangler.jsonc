@@ -6,18 +6,75 @@
 		"enabled": true
 	},
 	"d1_databases": [
-  {
-    "binding": "DB",
-    "database_name": "booksharekh-ai-db",
-    "database_id": "b53158e2-465c-4324-b395-c90bb1a46300",
-    "migrations_dir": "migrations"
-  }
-],
+		{
+			"binding": "DB",
+			"database_name": "booksharekh-ai-db",
+			"database_id": "b53158e2-465c-4324-b395-c90bb1a46300",
+			"migrations_dir": "migrations"
+		}
+	],
+	// Create both queues once before deploying:
+	//   npx wrangler queues create booksharekh-tasks
+	//   npx wrangler queues create booksharekh-tasks-dlq
+	// Every 15 minutes: announce new book requests from booksharekh.com (Workers Free includes cron triggers).
+	"triggers": { "crons": ["*/2 * * * *"] },
+	"queues": {
+		"producers": [{ "binding": "TASK_QUEUE", "queue": "booksharekh-tasks" }],
+		"consumers": [
+			{
+				"queue": "booksharekh-tasks",
+				"max_batch_size": 5,
+				"max_batch_timeout": 2,
+				"max_retries": 5,
+				"dead_letter_queue": "booksharekh-tasks-dlq"
+			},
+			{ "queue": "booksharekh-tasks-dlq", "max_batch_size": 10, "max_retries": 2 }
+		]
+	},
 	"vars": {
 		"OWNER_TELEGRAM_ID": "802529780",
-		"GITHUB_OWNER": "REPLACE_WITH_GITHUB_OWNER",
-		"GITHUB_REPO": "booksharekh-ai-manager",
-		"AI_PROVIDER": "mock",
-		"AI_MODEL": "gpt-4.1-mini"
+		"GITHUB_OWNER": "Bandith9999",
+		"GITHUB_REPO": "booksharekh",
+
+		// Website management. WEBSITE_REPO = the PRIVATE Laravel repository name (empty until it exists).
+		// LARAVEL_API_URL = base URL of the restricted AI API (empty until installed); its token is the
+		// secret LARAVEL_API_TOKEN.
+		// Telegram messages: "km" = short Khmer (commands and technical words stay English); "en" = English.
+		"BOT_LANGUAGE": "km",
+		"WEBSITE_URL": "https://booksharekh.com",
+		// Book searches return only editions in these languages (2-letter codes).
+		"BOOK_LANGUAGES": "en",
+		"WEBSITE_REPO": "booksharekh-website",
+		"LARAVEL_API_URL": "https://booksharekh.com",
+
+		// Planning AI: Claude Sonnet 5.5 via the Anthropic API (owner decision 2026-11-22, ~ $0.01 per plan).
+		// Key: Cloudflare secret ANTHROPIC_API_KEY. Every tier inherits this default.
+		// $0 alternative (README section I): AI_DEFAULT_PROVIDER=google, AI_DEFAULT_MODEL=gemini-3.8-flash,
+		// AI_PAID_ENABLED=false, plus the secret GEMINI_API_KEY.
+		"AI_DEFAULT_PROVIDER": "anthropic",
+		"AI_DEFAULT_MODEL": "claude-sonnet-5-5",
+
+		// Paid AI lock. "true" = unlocked by the owner for Claude. When "false", only the free Gemini models
+		// below (and mock) can run. Only the owner should change this.
+		"AI_PAID_ENABLED": "true",
+		"AI_FREE_MODELS": "gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash-lite",
+		// json_schema (default) | openapi | prompt. Switch if Gemini rejects the schema field; output is
+		// validated in the Worker in every mode.
+		"GEMINI_SCHEMA_MODE": "json_schema",
+
+		// Runtime provider fallback is off (and a paid fallback is refused while paid AI is locked).
+		"AI_FALLBACK_ENABLED": "false",
+
+		// Spending cap. 100,000 tokens/day on Claude Sonnet 5.5 is at most about $1/day even if every token
+		// were output ($10 per million). Daily limits pause tasks; per-minute limits retry later.
+		// Also set a monthly limit in the Claude Console (Plans & Billing) as a second guard.
+		"AI_MAX_REQUESTS_PER_MINUTE": "5",
+		"AI_MAX_REQUESTS_PER_DAY": "60",
+		"DAILY_TASK_LIMIT": "150",
+		"RECOMMEND_EVERY_DAYS": "3",
+		"TASK_RATE_LIMIT_PER_HOUR": "10",
+		"TASK_TOKEN_BUDGET": "20000",
+		"DAILY_TOKEN_BUDGET": "100000",
+		"APPROVAL_TTL_HOURS": "24"
 	}
 }

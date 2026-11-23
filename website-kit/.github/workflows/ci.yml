@@ -1,0 +1,40 @@
+# CI for the private BookShareKH website repository. Runs on every pull request and on main.
+# Make it a required status check for main (Settings → Branches → branch protection).
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - name: PHP lint
+        run: |
+          errs=$(find app routes config database -name '*.php' -print0 2>/dev/null | xargs -0 -r -n1 php -l 2>&1 | grep -v "No syntax errors" || true)
+          if [ -n "$errs" ]; then echo "$errs"; exit 1; fi
+      - name: Tests
+        run: |
+          if [ -d tests ]; then cp -n .env.example .env; php artisan key:generate --force; php artisan test --log-junit junit.xml || true; php .github/scripts/check-tests.php junit.xml; else echo "No tests directory yet"; fi
+      - name: Secret scan (added lines)
+        run: |
+          BASE=${{ github.event.pull_request.base.sha || 'HEAD~1' }}
+          if git diff "$BASE"...HEAD | grep -nE '^\+.*(APP_KEY=base64:|DB_PASSWORD=.+|sk-ant-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|ghp_[A-Za-z0-9]{20,}|github_pat_|-----BEGIN [A-Z ]*PRIVATE KEY)'; then
+            echo "Secret-like content found in this change"; exit 1; fi
+      - name: No .env committed
+        run: '! git ls-files | grep -E "(^|/)\.env($|\.)" | grep -v "\.env\.example$"'

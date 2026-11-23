@@ -1,0 +1,137 @@
+# Deploy an owner-approved commit to booksharekh.com (cPanel, ~/public_html) over SSH.
+# Dispatched only by the AI Manager after the owner approves this exact commit in Telegram.
+# Uploads ONLY files changed since the last deploy; never touches .env, storage/, vendor/,
+# uploaded books/covers, or the other sites on the account. Backs up first, checks the site
+# after, and restores the backup automatically if the check fails.
+name: Deploy to booksharekh.com
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: Approved BookShareKH task ID
+        required: true
+        type: string
+      sha:
+        description: Approved commit to deploy
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TASK_ID: ${{ inputs.task_id }}
+      SHA: ${{ inputs.sha }}
+      WORKER_URL: ${{ secrets.WORKER_URL }}
+      JOB_CALLBACK_SECRET: ${{ secrets.JOB_CALLBACK_SECRET }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      DEPLOY_PATH: public_html
+      # The cPanel export this repository started from (= what the server ran before automated deploys).
+      FIRST_BASE: d56611b
+    steps:
+      - name: Validate inputs
+        run: '[[ "$TASK_ID" =~ ^BSK-[a-f0-9-]{36}$ && "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid inputs"; exit 1; }'
+
+      - name: Confirm this exact commit was approved
+        run: |
+          curl -fsS --max-time 20 -A "BookShareKH-GitHub-Runner/1.0" -H "Authorization: Bearer $JOB_CALLBACK_SECRET" "$WORKER_URL/job/$TASK_ID" -o "$RUNNER_TEMP/job.json"
+          python3 -c "import json,os,sys; j=json.load(open(os.environ['RUNNER_TEMP']+'/job.json')); sys.exit(0 if j.get('deploy_sha')==os.environ['SHA'] else 'commit does not match the approved deploy')"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+
+      - name: Set up SSH
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          PORT: ${{ secrets.DEPLOY_PORT }}
+          USR: ${{ secrets.DEPLOY_USER }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts
+          printf 'Host site\n  HostName %s\n  Port %s\n  User %s\n  IdentityFile ~/.ssh/deploy\n  StrictHostKeyChecking yes\n  BatchMode yes\n  ConnectTimeout 20\n' "$HOST" "$PORT" "$USR" > ~/.ssh/config
+          ssh site 'echo connected'
+
+      - name: List files changed since the last deploy
+        id: files
+        run: |
+          BASE=$(ssh site 'cat ~/.booksharekh-deployed-sha 2>/dev/null' || true)
+          if ! [[ "$BASE" =~ ^[0-9a-f]{40}$ ]] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then BASE=$FIRST_BASE; fi
+          # Code only: never repo tooling, tests, secrets, runtime data or uploads.
+          SKIP=(':!.github' ':!tests' ':!website-kit' ':!*.md' ':!.env*' ':!storage' ':!vendor' ':!node_modules' ':!public/images/files' ':!public/images/covers' ':!public/storage' ':!phpunit.xml' ':!.gitignore' ':!.gitattributes' ':!.editorconfig')
+          git diff --name-only --diff-filter=ACMR "$BASE" "$SHA" -- . "${SKIP[@]}" > "$RUNNER_TEMP/files.txt"
+          git diff --name-only --diff-filter=D "$BASE" "$SHA" -- . "${SKIP[@]}" > "$RUNNER_TEMP/deleted.txt"
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+          echo "count=$(grep -c . "$RUNNER_TEMP/files.txt" || true)" >> "$GITHUB_OUTPUT"
+          echo "migrations=$(grep -c '^database/migrations/' "$RUNNER_TEMP/files.txt" || true)" >> "$GITHUB_OUTPUT"
+          echo "Deploying $(grep -c . "$RUNNER_TEMP/files.txt" || true) file(s) from ${BASE:0:12} to ${SHA:0:12}:"; cat "$RUNNER_TEMP/files.txt"
+
+      - name: Back up, upload, clear caches
+        id: upload
+        if: steps.files.outputs.count != '0'
+        run: |
+          TS=$(date -u +%Y%m%d-%H%M%S)
+          # Back up the current version of every file about to be replaced (new files have nothing to back up).
+          ssh site "mkdir -p ~/deploy-backups && cd ~/$DEPLOY_PATH && tar czf ~/deploy-backups/$TS.tgz --ignore-failed-read -T - 2>/dev/null; ls -la ~/deploy-backups/$TS.tgz" < "$RUNNER_TEMP/files.txt"
+          echo "backup=$TS" >> "$GITHUB_OUTPUT"
+          tar czf - -T "$RUNNER_TEMP/files.txt" | ssh site "cd ~/$DEPLOY_PATH && tar xzf -"
+          ssh site "cd ~/$DEPLOY_PATH && php artisan optimize:clear"
+
+      - name: Health check (from the server, past Cloudflare)
+        id: health
+        if: steps.files.outputs.count != '0'
+        run: |
+          for i in 1 2 3; do
+            CODE=$(ssh site "curl -s -o /dev/null -w '%{http_code}' --max-time 20 --resolve booksharekh.com:80:127.0.0.1 http://booksharekh.com/" || echo 000)
+            echo "attempt $i: HTTP $CODE"
+            if [ "$CODE" != 000 ] && [ "$CODE" -lt 500 ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+            sleep 5
+          done
+          echo "ok=false" >> "$GITHUB_OUTPUT"; echo "code=$CODE" >> "$GITHUB_OUTPUT"
+
+      - name: Roll back if the site is unhealthy
+        if: steps.health.outputs.ok == 'false' && steps.upload.outputs.backup != ''
+        run: ssh site "cd ~/$DEPLOY_PATH && tar xzf ~/deploy-backups/${{ steps.upload.outputs.backup }}.tgz && php artisan optimize:clear"
+
+      - name: Record the deployed commit
+        if: steps.health.outputs.ok == 'true' || steps.files.outputs.count == '0'
+        run: ssh site "echo $SHA > ~/.booksharekh-deployed-sha"
+
+      - name: Report to the AI Manager
+        if: always()
+        env:
+          COUNT: ${{ steps.files.outputs.count }}
+          MIGRATIONS: ${{ steps.files.outputs.migrations }}
+          HEALTH: ${{ steps.health.outputs.ok }}
+          CODE: ${{ steps.health.outputs.code }}
+          BACKUP: ${{ steps.upload.outputs.backup }}
+        run: |
+          rm -f ~/.ssh/deploy
+          python3 - <<'PY'
+          import json, os, urllib.request
+          e = os.environ
+          n = e.get('COUNT') or ''
+          if n == '0': ok, note = True, 'Nothing to deploy: the site already has this commit.'
+          elif e.get('HEALTH') == 'true': ok, note = True, f"Deployed {n} file(s) to booksharekh.com. Backup: {e.get('BACKUP')}."
+          elif e.get('HEALTH') == 'false': ok, note = False, f"Site check failed (HTTP {e.get('CODE')}) after deploy; the previous files were restored automatically."
+          else: ok, note = False, 'Deploy failed before the site was changed; see the run log.'
+          if ok and e.get('MIGRATIONS') not in ('', '0'): note += ' Includes a database migration that was NOT run; it needs a separate check.'
+          body = {'task_id': e['TASK_ID'], 'status': 'completed' if ok else 'failed', 'run_url': e['RUN_URL'], 'note': note}
+          if ok: body['deployed_sha'] = e['SHA']
+          req = urllib.request.Request(e['WORKER_URL'].rstrip('/') + '/job-result', data=json.dumps(body).encode(),
+              headers={'Authorization': 'Bearer ' + e['JOB_CALLBACK_SECRET'], 'Content-Type': 'application/json', 'User-Agent': 'BookShareKH-GitHub-Runner/1.0'})
+          urllib.request.urlopen(req, timeout=25)
+          PY

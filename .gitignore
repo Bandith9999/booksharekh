@@ -9,5 +9,11 @@ node_modules/
 __pycache__/
 *.pyc
 
-__pycache__/
-*.pyc
+# Local D1 exports (contain private task data)
+backups/
+
+# Website exports and database dumps (private data) - never commit
+*.zip
+*.sql
+*.sql.gz
+!migrations/*.sql
