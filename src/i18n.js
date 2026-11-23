@@ -9,7 +9,6 @@ const pick = (env, en, km) => (isKhmer(env) ? km : en);
 const NOTES = {
   topup: ['TOP-UP', 'បញ្ចូលប្រាក់'],
   member: ['NEW MEMBER', 'សមាជិកថ្មី'],
-  login: ['LOGIN', 'Login'],
   request: ['BOOK REQUEST', 'សំណើសៀវភៅ'],
   promo: ['PROMO VIDEO', 'វីដេអូផ្សព្វផ្សាយ'],
   recommend: ['BOOK IDEAS', 'ណែនាំសៀវភៅ'],
@@ -103,11 +102,7 @@ ${url}` : ''}`),
   topupProblem: (env, id, msg) => pick(env, `⚠️ Top-up #${id}: ${msg}`, `⚠️ Top-up #${id}: ${msg}`),
   topupUnknown: env => pick(env, 'This top-up is no longer in my list. Send /topups to see pending ones.', 'រកមិនឃើញ។ សូមវាយ /topups'),
   // Users: one short message per check, only when something happened.
-  userActivity: (env, reg, logins, total) => [
-    reg ? `${note(env, 'member')}\n${reg}` : '',
-    logins ? `${note(env, 'login')}\n🔑 ${logins}` : '',
-    pick(env, `👥 Total users: ${total}`, `👥 សរុប ${total} នាក់`),
-  ].filter(Boolean).join('\n\n'),
+  userActivity: (env, reg, total) => `${note(env, 'member')}\n${reg}\n\n` + pick(env, `👥 Total users: ${total}`, `👥 សរុប ${total} នាក់`),
   usersSummary: (env, total, reg, logins) => pick(env, `👥 Total users: ${total}\n🆕 New (24h): ${reg}\n🔑 Logged in (24h): ${logins}`,
     `👥 សរុប ${total} នាក់\n🆕 ថ្មី (24h): ${reg}\n🔑 Login (24h): ${logins}`),
   // Marketing promo videos (posting on TikTok / Facebook is done by the owner).

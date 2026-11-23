@@ -1,5 +1,6 @@
-// booksharekh.com sign-ups and sign-ins -> one short Telegram message per check, with the user total.
-// New members show email and user name; logins show user names only. Never IP addresses.
+// booksharekh.com new members -> one short Telegram message per check, with the user total.
+// Shows email and user name; never IP addresses. Logins are not alerted (owner request);
+// /users still counts them.
 import { clamp } from '../helpers.js';
 import { notifyOwner } from '../telegram.js';
 import { T } from '../i18n.js';
@@ -14,13 +15,6 @@ const setSetting = (env, key, value) => env.DB.prepare(`INSERT INTO settings (ke
 
 const VALID_TIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 const fmt = n => Number(n || 0).toLocaleString('en-US');
-
-// Logins: "sok, vanna" — at most 10 names, then "+N".
-export function names(rows = []) {
-  const list = rows.slice(0, MAX_NAMES).map(r => clamp(r.user || '?', 40));
-  if (rows.length > MAX_NAMES) list.push(`+${rows.length - MAX_NAMES}`);
-  return list.join(', ');
-}
 
 // New members (owner request): "🆕 email · user name", one per line, at most 10.
 export function members(rows = []) {
@@ -37,12 +31,10 @@ export async function pollUsers(env) {
   const res = await userActivity(env, since);
   const now = VALID_TIME.test(res?.now || '') ? res.now : null;
   if (!now) return { skipped: 'bad response' };
-  const reg = res.registered || [], logins = res.logins || [];
-  if (stored && (reg.length || logins.length)) {
-    await notifyOwner(env, T.userActivity(env, members(reg), names(logins), fmt(res.total_users)));
-  }
+  const reg = res.registered || [];
+  if (stored && reg.length) await notifyOwner(env, T.userActivity(env, members(reg), fmt(res.total_users)));
   await setSetting(env, CURSOR, now);
-  return { registered: reg.length, logins: logins.length, total: res.total_users };
+  return { registered: reg.length, total: res.total_users };
 }
 
 // /users: total plus the last 24 hours (site time).

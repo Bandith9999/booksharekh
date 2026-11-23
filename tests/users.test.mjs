@@ -23,7 +23,7 @@ function site() {
   return { state, routes };
 }
 
-test('first check is silent; then one short message with new users, logins and the total', async () => {
+test('first check is silent; then one short message with new members and the total (no logins)', async () => {
   const e = env();
   const s = site();
   const calls = mockFetch(s.routes);
@@ -39,21 +39,26 @@ test('first check is silent; then one short message with new users, logins and t
   s.state.total = 1234;
   await worker.scheduled({}, e, {});
   assert.equal(s.state.asked[1].since, '2026-11-22 10:00:01', 'continues from the site time it returned');
-  assert.equal(lastText(calls), '*** សមាជិកថ្មី ***\n🆕 dara@example.com · dara\n🆕 nita\n\n*** Login ***\n🔑 sok, vanna\n\n👥 សរុប 1,234 នាក់');
+  assert.equal(lastText(calls), '*** សមាជិកថ្មី ***\n🆕 dara@example.com · dara\n🆕 nita\n\n👥 សរុប 1,234 នាក់');
 
   const before = sent(calls).length;
   await worker.scheduled({}, e, {});
   assert.equal(sent(calls).length, before, 'nothing new -> no message');
 });
 
-test('many logins are capped to 10 names', async () => {
+test('logins alone send no alert; many new members are capped to 10 lines', async () => {
   const e = env('en');
   const s = site();
   const calls = mockFetch(s.routes);
   await worker.scheduled({}, e, {});
-  s.state.activity = { registered: [], logins: Array.from({ length: 13 }, (_, i) => ({ user: `u${i}` })) };
+  const before = sent(calls).length;
+  s.state.activity = { registered: [], logins: [{ user: 'niza' }] };
   await worker.scheduled({}, e, {});
-  assert.equal(lastText(calls), '*** LOGIN ***\n🔑 u0, u1, u2, u3, u4, u5, u6, u7, u8, u9, +3\n\n👥 Total users: 1,200');
+  assert.equal(sent(calls).length, before, 'login only -> no message');
+  assert.ok(!sent(calls).some(m => /Login|🔑/.test(m.text)));
+  s.state.activity = { registered: Array.from({ length: 13 }, (_, i) => ({ user: `u${i}` })), logins: [{ user: 'niza' }] };
+  await worker.scheduled({}, e, {});
+  assert.equal(lastText(calls), `*** NEW MEMBER ***\n${Array.from({ length: 10 }, (_, i) => `🆕 u${i}`).join('\n')}\n+3\n\n👥 Total users: 1,200`);
 });
 
 test('/users shows the total and the last 24 hours', async () => {
@@ -71,8 +76,8 @@ test('/preview sends a sample of every alert with inert buttons, owner only', as
   const calls = mockFetch([[/api\.telegram\.org/, () => Response.json({ ok: true, result: {} })]]);
   await telegram(e, msg('/preview'));
   const msgs = sent(calls);
-  assert.equal(msgs.length, 13, 'intro + 12 samples');
-  assert.match(msgs[0].text, /^🧪 Preview: 12 sample alerts/);
+  assert.equal(msgs.length, 12, 'intro + 11 samples');
+  assert.match(msgs[0].text, /^🧪 Preview: 11 sample alerts/);
   assert.match(msgs[1].text, /^\*\*\* បញ្ចូលប្រាក់ \*\*\*/);
   assert.match(msgs[5].text, /^\*\*\* សមាជិកថ្មី \*\*\*\n🆕 lyly@example\.com · Lyly\.Hong/);
   const buttons = msgs.flatMap(m => m.reply_markup?.inline_keyboard.flat() ?? []);
