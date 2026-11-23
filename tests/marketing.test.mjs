@@ -103,7 +103,7 @@ function recommendSources({ onSite = ['Atomic Habits'] } = {}) {
   ] };
 }
 
-test('/recommend: at least 10 popular books the site lacks, public-domain ones get an import button', async () => {
+test('/recommend: at least 10 popular books the site lacks, as a plain title — author list', async () => {
   const e = env();
   const s = recommendSources();
   const calls = mockFetch(s.routes);
@@ -113,10 +113,11 @@ test('/recommend: at least 10 popular books the site lacks, public-domain ones g
   assert.match(m.text, /^\*\*\* ណែនាំសៀវភៅ \*\*\*\n📈 សៀវភៅពេញនិយម ដែលវេបសាយមិនទាន់មាន:/);
   assert.ok(lines.length >= 10 && lines.length <= 12, `got ${lines.length}`);
   assert.ok(!m.text.includes('Atomic Habits'), 'books already on the site are skipped');
-  assert.match(m.text, /\d+\. Trending 0 — Author 0 \(2020\) 🔒/);
-  assert.match(m.text, /\d+\. Classic 0 — Old0 Writer 🟢/);
-  const buttons = m.reply_markup.inline_keyboard.flat();
-  assert.ok(buttons.length >= 3 && buttons.every(b => /^bi:10\d:0$/.test(b.callback_data)), 'import buttons only for public domain');
+  assert.match(m.text, /\n\d+\. Trending 0 — Author 0\n/);
+  assert.match(m.text, /\n\d+\. Classic 0 — Old0 Writer(\n|$)/);
+  for (const l of lines) assert.match(l, /^\d+\. [^—]+ — [^—]+$/, 'title — author only');
+  assert.doesNotMatch(m.text, /🟢|🔒|📥|copyright|license|public domain|\(20\d\d\)/i, 'no marks, years or rights notes');
+  assert.equal(m.reply_markup, undefined, 'no buttons');
 
   await telegram(e, msg('/recommend'));
   assert.equal(sent(calls).filter(x => /Trending 0 —/.test(x.text)).length, 1, 'not recommended again within 21 days');
