@@ -24,6 +24,12 @@ export const qaContentAction = {
   kind: 'ai',
   optional: true, // never blocks the owner's approval
   description: 'Second-opinion review of the marketing text (Khmer, facts, focus)',
+  // A real second opinion: review with a different AI than the one that wrote the text.
+  async avoidProviders(env, { task }) {
+    const w = await env.DB.prepare(`SELECT provider FROM agent_execution_logs WHERE task_id=? AND agent<>'qa_reviewer' AND outcome='success'
+        ORDER BY id DESC LIMIT 1`).bind(task.id).first();
+    return w?.provider ? [w.provider] : [];
+  },
   async buildRequest(env, { task }) {
     const a = await latestArtifact(env, task.id, KIND[task.task_type]);
     if (!a) throw new Error('nothing to review');

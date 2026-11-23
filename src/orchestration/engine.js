@@ -240,7 +240,7 @@ async function skipOptionalStep(env, task, at, e) {
 
 async function handleStepError(env, task, at, e) {
   const message = e?.message || String(e);
-  if (e?.kind === 'quota') return pauseStep(env, task, at, message);
+  if (e?.kind === 'quota') return pauseStep(env, task, at, message, e.resumeAt);
   if (e?.retryable && at.attempts < at.max_attempts &&
       await transition(env.DB, 'agent_tasks', at.id, 'queued', { from: ['running'], set: { error: clamp(message, 500) } })) {
     await audit(env, task.id, 'STEP_RETRY', 'worker', `${at.agent}.${at.action} attempt ${at.attempts}/${at.max_attempts}: ${message}`);
@@ -267,13 +267,37 @@ const cancelOpenSteps = (env, taskId) => env.DB.prepare(`UPDATE agent_tasks SET 
     WHERE task_id=? AND status IN ('pending','awaiting_approval','queued','paused','revision_required')`).bind(taskId).run();
 
 // Daily quota or budget exhausted: stop and tell the owner. Never switch to another (paid) provider.
-async function pauseStep(env, task, at, message) {
+async function pauseStep(env, task, at, message, resumeAt = null) {
   await transition(env.DB, 'agent_tasks', at.id, 'paused', { from: ['running'], set: { error: clamp(message, 500) } });
   await transition(env.DB, 'tasks', task.id, 'paused', { set: { result_note: clamp(message, 500) } });
-  await audit(env, task.id, 'PAUSED', 'worker', `${at.agent}.${at.action}: ${message}`);
+  await audit(env, task.id, 'PAUSED', 'worker', `${at.agent}.${at.action}: ${message}${resumeAt ? ` (auto-resume ${new Date(resumeAt).toISOString()})` : ''}`);
   const ref = `${task.id.slice(0, 17)}…`;
+  if (resumeAt) {
+    // Every AI is resting: continue by itself when the first one is free again (cron, every 2 minutes).
+    await env.DB.prepare(`INSERT INTO settings (key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`).bind(`auto_resume:${task.id}`, String(resumeAt)).run();
+    // Short waits stay quiet; long ones tell the owner when work continues.
+    if (resumeAt - Date.now() > 10 * 60000) await notify(env, task, T.pausedAuto(env, resumeAt, ref));
+    return { paused: true, resumeAt };
+  }
   await notify(env, task, T.paused(env, task, clamp(message, 300), ref));
   return { paused: true };
+}
+
+// Cron: resume tasks whose AIs are free again.
+export async function autoResume(env, now = Date.now()) {
+  const rows = (await env.DB.prepare("SELECT key, value FROM settings WHERE key LIKE 'auto_resume:%'").all()).results || [];
+  let resumed = 0;
+  for (const r of rows) {
+    if (Number(r.value) > now) continue;
+    const taskId = r.key.slice('auto_resume:'.length);
+    await env.DB.prepare('DELETE FROM settings WHERE key=?').bind(r.key).run();
+    const task = await getTask(env, taskId);
+    if (task?.status !== 'paused') continue;
+    const res = await resumeTask(env, taskId, task.telegram_user_id);
+    if (res.ok) { resumed++; await audit(env, taskId, 'AUTO_RESUMED', 'system', 'AI limits reset'); }
+  }
+  return { resumed };
 }
 
 export async function resumeTask(env, taskId, userId) {

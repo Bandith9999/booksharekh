@@ -8,7 +8,7 @@ const RETRYABLE = new Set(['rate_limit', 'overloaded', 'server', 'timeout', 'net
 export const AVAILABILITY_KINDS = new Set(['rate_limit', 'overloaded', 'server', 'timeout', 'network']);
 
 export class AIError extends Error {
-  constructor(message, { kind = 'unknown', status = null, provider = null, retryAfter = null, usage = null } = {}) {
+  constructor(message, { kind = 'unknown', status = null, provider = null, retryAfter = null, usage = null, resumeAt = null } = {}) {
     super(message);
     this.name = 'AIError';
     this.kind = kind;
@@ -16,6 +16,7 @@ export class AIError extends Error {
     this.provider = provider;
     this.retryAfter = retryAfter; // seconds, from the provider's Retry-After header
     this.usage = usage;           // tokens already spent, when the provider reported them
+    this.resumeAt = resumeAt;     // ms timestamp: when every AI is limited, the task resumes itself then
   }
   get retryable() { return RETRYABLE.has(this.kind); }
 }

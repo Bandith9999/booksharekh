@@ -6,7 +6,7 @@ import { reply, tgForm } from './telegram.js';
 import { markPromoted, promoOf } from './marketing/promo.js';
 import { posterOf } from './marketing/poster.js';
 import { T } from './i18n.js';
-import { advance } from './orchestration/engine.js';
+import { advance, autoResume } from './orchestration/engine.js';
 import { deployShaOf, prReviewText } from './orchestration/github.js';
 import { handleCallback, handleMessage } from './commands.js';
 import { handleQueueBatch } from './orchestration/queue-consumer.js';
@@ -187,6 +187,7 @@ export default {
   },
   // Cron trigger (wrangler.jsonc): announce new booksharekh.com book requests in Telegram.
   async scheduled(event, env) {
+    try { await autoResume(env); } catch (e) { console.error('auto-resume failed', String(e)); }
     try { await pollTopups(env); } catch (e) { console.error('top-up poll failed', String(e)); }
     try { await pollUsers(env); } catch (e) { console.error('user activity poll failed', String(e)); }
     try { await pollPurchases(env); } catch (e) { console.error('purchase poll failed', String(e)); }

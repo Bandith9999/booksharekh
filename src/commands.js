@@ -3,7 +3,7 @@ import { clamp, isOwner, parseCommand, parseMemory, parseTaskRef, githubHint } f
 import { audit, findTask, getAgentOverride, listAgentTasks } from './db.js';
 import { reply, tg } from './telegram.js';
 import { AGENTS, TOOLS, isImplemented, validateRegistry } from './agents/registry.js';
-import { fallbackRoute, freeModels, paidEnabled, resolveRoute, validateRoute } from './ai/model-router.js';
+import { chainLabel, cooldownOf, fallbackRoute, freeModels, paidEnabled, resolveChain, resolveRoute, validateRoute } from './ai/model-router.js';
 import { PROVIDER_NAMES, getProvider, normalizeProvider } from './ai/provider-factory.js';
 import { approveStep, cancelTask, createBookImport, createDeployTask, createPosterTask, createPromoTask, createTask, rejectStep, resumeTask } from './orchestration/engine.js';
 import { SourceDownError, getCandidate, searchPublicDomain } from './books/gutenberg.js';
@@ -25,8 +25,11 @@ const short = id => `${id.slice(0, 17)}…`;
 
 // ---------- formatting ----------
 function routeLabel(env, def, override) {
+  const chain = resolveChain(env, def, override);
+  // One AI: its route. A chain: the order in which AIs take the work (→ = takes over at a limit).
+  if (chain.length > 1) return `${chainLabel(chain)} (${chain[0].source})`;
   try {
-    const r = resolveRoute(env, def, override);
+    const r = chain[0];
     validateRoute(env, r);
     return `${r.provider}/${r.model} (${r.source})`;
   } catch (e) { return `⚠️ ${e.message}`; }
@@ -131,8 +134,17 @@ export async function diagnostics(env) {
     if (!Object.values(a.actions).some(x => x.kind === 'ai')) continue; // only agents that call a model today
     const ov = await getAgentOverride(env, a.name).catch(() => null);
     if (ov?.enabled === 0) continue;
-    try { const r = resolveRoute(env, a, ov); validateRoute(env, r); routes.set(`${r.provider}/${r.model}`, r); }
-    catch (e) { lines.push(`❌ ${a.name}: ${e.message}`); }
+    const chain = resolveChain(env, a, ov);
+    if (chain.length > 1) lines.push(`🔗 ${a.name}: ${chainLabel(chain)}`);
+    for (const r of chain) {
+      try { validateRoute(env, r); routes.set(`${r.provider}/${r.model}`, r); }
+      catch (e) { if (chain.length === 1) lines.push(`❌ ${a.name}: ${e.message}`); }
+    }
+  }
+  // AIs resting after a limit (they take work again by themselves after this time).
+  for (const p of ['anthropic', 'openai', 'google']) {
+    const rest = await cooldownOf(env, p).catch(() => null);
+    if (rest) lines.push(`😴 ${p} resting (${rest.kind}) until ${new Date(rest.until).toISOString().slice(0, 16).replace('T', ' ')} UTC`);
   }
   const fb = fallbackRoute(env, { allowFallback: true });
   if (fb) routes.set(`${fb.provider}/${fb.model} (fallback)`, fb);
@@ -140,7 +152,7 @@ export async function diagnostics(env) {
     try {
       validateRoute(env, r);
       const c = await getProvider(r.provider).checkModel(env, r.model);
-      lines.push(c.ok ? `✅ ${label}: key accepted, model available` : `❌ ${label}: HTTP ${c.status} ${c.detail}${c.hint ? `\n   → ${c.hint}` : ''}`);
+      lines.push(c.ok ? `✅ ${label}: key accepted, model available${c.model ? ` (${c.model})` : ''}` : `❌ ${label}: HTTP ${c.status} ${c.detail}${c.hint ? `\n   → ${c.hint}` : ''}`);
     } catch (e) { lines.push(`❌ ${label}: ${e.message}`); }
   }
   const b = budgets(env);

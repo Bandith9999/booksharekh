@@ -18,6 +18,8 @@ const NOTES = {
 };
 export const note = (env, kind) => { const [dept, en, km] = NOTES[kind]; return `${DEPT[dept]} · *** ${pick(env, en, km)} ***`; };
 const short = id => `${String(id).slice(0, 17)}…`;
+// "23/11 09:00" in Phnom Penh time.
+const khTime = t => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Phnom_Penh', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(t).replace(',', '');
 
 export const T = {
   unknown: env => pick(env, 'Unknown command. Try /help.', 'មិនស្គាល់ command។ សូមវាយ /help'),
@@ -124,6 +126,16 @@ ${url}` : ''}`),
   posterBusy: env => pick(env, '⏳ A poster is already in progress. One at a time: finish or /cancel it first.', '⏳ មាន poster មួយកំពុងធ្វើ — ម្តងមួយ។ សូមរង់ចាំ ឬ /cancel'),
   posterStarted: env => pick(env, '🖼 Writing the poster text…', '🖼 កំពុងសរសេរអត្ថបទ poster…'),
   promoStarted: env => pick(env, '🎬 Writing the video script…', '🎬 កំពុងសរសេរ script វីដេអូ…'),
+  // AI chain: an AI at its limit rests; the next one takes over (times shown in Phnom Penh time).
+  aiResting: (env, provider, kind, until) => {
+    const name = { anthropic: 'Claude', openai: 'Codex', google: 'Gemini' }[provider] || provider;
+    const why = { quota: pick(env, 'limit reached', 'ដល់ដែនកំណត់'), auth: pick(env, 'key rejected', 'key មិនត្រឹមត្រូវ'), rate_limit: pick(env, 'busy', 'រវល់'),
+      model_not_found: pick(env, 'model not available', 'មិនមាន model'), config: pick(env, 'not set up', 'មិនទាន់កំណត់') }[kind] || kind;
+    return pick(env, `🔄 ${name}: ${why} — other AIs continue the work. ${name} returns at ${khTime(until)}.`,
+      `🔄 ${name} ${why} — AI ផ្សេងធ្វើការបន្ត។ ${name} ត្រឡប់មកវិញម៉ោង ${khTime(until)}`);
+  },
+  pausedAuto: (env, until, ref) => pick(env, `⏸ All AIs are at their limits. Work continues automatically at ${khTime(until)} (${ref}).`,
+    `⏸ AI ទាំងអស់ដល់ដែនកំណត់ — នឹងបន្តដោយស្វ័យប្រវត្តិម៉ោង ${khTime(until)}`),
   forgetUsage: env => pick(env, 'Use: /forget <name>  (see names with /memory)', 'ប្រើ: /forget <ឈ្មោះ>  (មើលឈ្មោះក្នុង /memory)'),
   forgetMissing: (env, key) => pick(env, `Nothing saved as "${key}". See /memory.`, `គ្មាន "${key}" ទេ។ មើល /memory`),
   forgotten: (env, key) => pick(env, `🗑 Deleted: ${key}`, `🗑 បានលុប: ${key}`),

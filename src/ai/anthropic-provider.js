@@ -42,8 +42,10 @@ export const anthropicProvider = {
 
     const { response, body: res } = await fetchJson('anthropic', `${API}/messages`, { method: 'POST', headers: h, body: JSON.stringify(body) }, TIMEOUT_MS);
     if (!response.ok) {
-      throw new AIError(`anthropic API HTTP ${response.status}: ${clamp(errorDetail(res), 150)}. ${anthropicHint(response.status)}`,
-        { kind: kindForStatus(response.status), status: response.status, provider: 'anthropic', retryAfter: retryAfterSeconds(response) });
+      // An empty credit balance is a quota (another AI takes over), not a bad request.
+      const noCredit = response.status === 400 && /credit balance|billing/i.test(errorDetail(res));
+      throw new AIError(`anthropic API HTTP ${response.status}: ${clamp(errorDetail(res), 150)}. ${noCredit ? 'Credit balance too low: add credits in the Claude Console.' : anthropicHint(response.status)}`,
+        { kind: noCredit ? 'quota' : kindForStatus(response.status), status: response.status, provider: 'anthropic', retryAfter: retryAfterSeconds(response) });
     }
     const usage = { inputTokens: res?.usage?.input_tokens ?? 0, outputTokens: res?.usage?.output_tokens ?? 0 };
     if (res?.stop_reason === 'refusal') {

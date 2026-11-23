@@ -15,14 +15,35 @@ function hint(status, code) {
   return '';
 }
 
+// model "auto": ask OpenAI which models this key can use and pick the newest general GPT model,
+// preferring the affordable "Sol" line (e.g. gpt-6.2-sol). Cached in D1 settings for 7 days.
+const SKIP = /(mini|nano|audio|realtime|search|image|tts|transcribe|embedding|moderation|preview|instruct)/i;
+const version = id => Number((/^gpt-(\d+(?:\.\d+)?)/i.exec(id) || [])[1] || 0);
+export function pickOpenAIModel(ids) {
+  const usable = ids.filter(id => /^gpt-\d/i.test(id) && !SKIP.test(id));
+  const best = list => list.sort((a, b) => version(b) - version(a) || a.length - b.length)[0];
+  return best(usable.filter(id => /-sol$/i.test(id))) || best(usable.filter(id => /^gpt-\d+(\.\d+)?$/i.test(id))) || best(usable) || null;
+}
+export async function resolveOpenAIModel(env, { refresh = false } = {}) {
+  const cached = refresh ? null : await env.DB?.prepare("SELECT value, updated_at FROM settings WHERE key='openai_model' AND updated_at > datetime('now','-7 days')").first().catch(() => null);
+  if (cached?.value) return cached.value;
+  const { response, body } = await fetchJson('openai', `${API}/models`, { headers: { authorization: `Bearer ${String(env.OPENAI_API_KEY || '').trim()}` } }, 10000);
+  if (!response.ok) throw new AIError(`openai model list HTTP ${response.status}: ${clamp(errorDetail(body), 120)}. ${hint(response.status)}`, { kind: kindForStatus(response.status), status: response.status, provider: 'openai' });
+  const model = pickOpenAIModel((body?.data || []).map(m => String(m.id)));
+  if (!model) throw new AIError('No suitable GPT model is available to this OpenAI key', { kind: 'model_not_found', provider: 'openai' });
+  await env.DB?.prepare(`INSERT INTO settings (key,value,updated_at) VALUES ('openai_model',?,CURRENT_TIMESTAMP)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`).bind(model).run();
+  return model;
+}
+
 export const openaiProvider = {
   name: 'openai',
   keyName: 'OPENAI_API_KEY',
-  modelPattern: /^(gpt|o\d|chatgpt|codex)[a-z0-9._-]{0,60}$/i,
+  modelPattern: /^((gpt|o\d|chatgpt|codex)[a-z0-9._-]{0,60}|auto)$/i,
 
   async generate(env, req) {
     const body = {
-      model: req.model,
+      model: req.model === 'auto' ? await resolveOpenAIModel(env) : req.model,
       messages: [{ role: 'system', content: req.systemPrompt }, ...req.messages],
       // max_completion_tokens (not max_tokens) is accepted by both reasoning and non-reasoning models.
       max_completion_tokens: req.maxOutputTokens ?? 2000,
@@ -56,6 +77,10 @@ export const openaiProvider = {
   },
 
   async checkModel(env, model) {
+    if (model === 'auto') {
+      try { const m = await resolveOpenAIModel(env, { refresh: true }); return { ok: true, status: 200, detail: '', hint: '', model: m }; }
+      catch (e) { return { ok: false, status: e.status || 0, detail: clamp(e.message, 150), hint: '' }; }
+    }
     const { response, body } = await fetchJson('openai', `${API}/models/${encodeURIComponent(model)}`,
       { headers: { authorization: `Bearer ${String(env.OPENAI_API_KEY || '').trim()}` } }, 10000);
     return { ok: response.ok, status: response.status, detail: response.ok ? '' : clamp(errorDetail(body), 150), hint: response.ok ? '' : hint(response.status) };
