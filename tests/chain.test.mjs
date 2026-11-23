@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { PLAN, drain, lastText, latestTask, makeEnv, mockFetch, msg, routes, sent, telegram } from './harness.mjs';
 import { AGENTS } from '../src/agents/registry.js';
-import { cooldownOf, resolveChain } from '../src/ai/model-router.js';
+import { cooldownOf, nextMidnight, resolveChain } from '../src/ai/model-router.js';
 import { pickOpenAIModel } from '../src/ai/openai-provider.js';
 import { autoResume } from '../src/orchestration/engine.js';
 
@@ -77,7 +77,9 @@ test('all three at their limits → task pauses and resumes by itself after the 
   const task = latestTask(e);
   assert.equal(task.status, 'paused');
   const resumeAt = Number(e.DB.db.prepare('SELECT value FROM settings WHERE key=?').get(`auto_resume:${task.id}`).value);
-  assert.ok(Math.abs(resumeAt - (Date.now() + 3600000)) < 5000, 'resumes when the first AI (Claude, 1 h) is free again');
+  // Whichever rest ends first: Claude's 1 h, or Gemini's quota reset at midnight Pacific (can be sooner late at night).
+  const expected = Math.min(Date.now() + 3600000, nextMidnight('America/Los_Angeles'));
+  assert.ok(Math.abs(resumeAt - expected) < 5000, 'resumes when the first AI is free again');
   assert.match(sent(calls).at(-1).text, /^⏸ All AIs are at their limits\. Work continues automatically at \d\d\/\d\d \d\d:\d\d/);
 
   assert.deepEqual(await autoResume(e, Date.now()), { resumed: 0 }, 'not before the time');
