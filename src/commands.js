@@ -225,6 +225,14 @@ export async function handleMessage(env, m) {
       const rows = await env.DB.prepare('SELECT key,value FROM memories ORDER BY updated_at DESC LIMIT 30').all();
       return reply(env, chat, rows.results?.length ? rows.results.map(x => `${x.key} = ${x.value}`).join('\n') : 'No memory saved.');
     }
+    case 'forget': {
+      const key = c.args.trim();
+      if (!/^[a-zA-Z0-9_.-]{1,80}$/.test(key)) return reply(env, chat, T.forgetUsage(env));
+      const r = await env.DB.prepare('DELETE FROM memories WHERE key=?').bind(key).run();
+      if (r.meta?.changes !== 1) return reply(env, chat, T.forgetMissing(env, key));
+      await audit(env, null, 'MEMORY_DELETED', user, key);
+      return reply(env, chat, T.forgotten(env, key));
+    }
     case 'status': { // one list: tasks waiting for you first (⏳), then the most recent
       const rows = await env.DB.prepare(`SELECT id,status,task_type,created_at FROM tasks
         ORDER BY (status='awaiting_approval') DESC, created_at DESC LIMIT 10`).all();

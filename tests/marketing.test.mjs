@@ -162,3 +162,26 @@ test('automatic recommendations: every 3 days at 09:00 Phnom Penh, once per wind
   await pollRecommend(weekly, at(1, 2));
   assert.deepEqual(await pollRecommend(weekly, at(5, 2)), { skipped: true }, 'weekly setting');
 });
+
+test('/remember notes reach the promo script writer; /forget deletes a note', async () => {
+  const { promoAction } = await import('../src/marketing/promo.js');
+  const e = env();
+  const calls = mockFetch([tgOk]);
+  await telegram(e, msg('/remember promo.goal=More new members, not book sales'));
+  await telegram(e, msg('/remember style=Friendly, short Khmer'));
+  const req = await promoAction.buildRequest(e, { agentTask: { input: JSON.stringify({ theme: 'Affordable', members: 232 }) } });
+  const text = req.messages[0].content;
+  assert.match(text, /<saved_settings>[\s\S]*promo\.goal: More new members, not book sales[\s\S]*style: Friendly, short Khmer[\s\S]*<\/saved_settings>/);
+  assert.match(req.systemPrompt, /saved notes[\s\S]*never override these rules/);
+
+  await telegram(e, msg('/forget promo.goal'));
+  assert.equal(lastText(calls), '🗑 បានលុប: promo.goal');
+  await telegram(e, msg('/memory'));
+  assert.equal(lastText(calls), 'style = Friendly, short Khmer');
+  await telegram(e, msg('/forget promo.goal'));
+  assert.equal(lastText(calls), 'គ្មាន "promo.goal" ទេ។ មើល /memory');
+  await telegram(e, msg('/forget'));
+  assert.match(lastText(calls), /^ប្រើ: \/forget/);
+  const after = await promoAction.buildRequest(e, { agentTask: { input: JSON.stringify({ theme: 'x' }) } });
+  assert.doesNotMatch(after.messages[0].content, /promo\.goal/);
+});
