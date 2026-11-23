@@ -37,7 +37,8 @@ export const workflowUrl = (env, wf = WORKFLOWS.demo) =>
 // The exact action the owner approves. Any change to the request, plan, repo or workflow changes the hash.
 export async function jobPayload(env, task, action = null, step = null) {
   const wf = workflowOf(action);
-  const plan = await latestArtifact(env, task.id, 'plan');
+  // Promo videos bind to the exact AI-written lines and captions the owner saw.
+  const plan = await latestArtifact(env, task.id, task.task_type === 'book_promo' ? 'promo' : 'plan');
   const inputs = { task_id: task.id };
   if (wf === WORKFLOWS.website_deploy) {
     inputs.sha = deployShaOf(step);

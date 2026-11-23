@@ -5,7 +5,7 @@ import { reply, tg } from './telegram.js';
 import { AGENTS, TOOLS, isImplemented, validateRegistry } from './agents/registry.js';
 import { fallbackRoute, freeModels, paidEnabled, resolveRoute, validateRoute } from './ai/model-router.js';
 import { PROVIDER_NAMES, getProvider, normalizeProvider } from './ai/provider-factory.js';
-import { approveStep, cancelTask, createBookImport, createDeployTask, createTask, rejectStep, resumeTask } from './orchestration/engine.js';
+import { approveStep, cancelTask, createBookImport, createDeployTask, createPromoTask, createTask, rejectStep, resumeTask } from './orchestration/engine.js';
 import { SourceDownError, getCandidate, searchPublicDomain } from './books/gutenberg.js';
 import { T, tr } from './i18n.js';
 import { candidatesMessage, findForRequest, recentPendingRequests, rejectRequest, requestKeyboard } from './books/requests.js';
@@ -16,6 +16,8 @@ import { WebsiteApiError, apiConfigured, apiHealth, formatBooks, latestBooks, se
 import { decideTopup, pendingTopups, sendTopupAlert } from './website/topups.js';
 import { usersSummary } from './website/users.js';
 import { sendSamples } from './samples.js';
+import { pickPromoBooks } from './marketing/promo.js';
+import { sendRecommendations } from './marketing/recommend.js';
 import { DEPARTMENTS, DEPT_BY_KEY, TAP_COMMANDS, registerMenu, sendDepartment, sendHelp } from './departments.js';
 
 const short = id => `${id.slice(0, 17)}…`;
@@ -294,6 +296,25 @@ export async function handleMessage(env, m) {
       }
     }
     case 'preview': return sendSamples(env, chat);
+    case 'promo': {
+      try {
+        const books = await pickPromoBooks(env);
+        if (!books.length) return reply(env, chat, T.promoNone(env));
+        const r = await createPromoTask(env, { userId: user, books });
+        if (r.rateLimited) return reply(env, chat, T.rateLimited(env, r.limit, r.period));
+        if (r.failed) return;
+        return reply(env, chat, T.promoStarted(env));
+      } catch (e) {
+        if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
+        throw e;
+      }
+    }
+    case 'recommend': {
+      try { return await sendRecommendations(env); } catch (e) {
+        if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
+        throw e;
+      }
+    }
     case 'users': {
       try { return reply(env, chat, await usersSummary(env)); } catch (e) {
         if (e instanceof WebsiteApiError) return reply(env, chat, e.message);

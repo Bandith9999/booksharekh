@@ -61,6 +61,13 @@ export async function searchPublicDomain(query, { limit = 3, languages = 'en' } 
     .filter(c => c?.publicDomain && c.epubUrl && c.languages.some(l => langs.includes(l))).slice(0, limit);
 }
 
+// Most-downloaded public-domain books (Gutendex sorts by popularity by default).
+export async function popularPublicDomain({ languages = 'en', limit = 32 } = {}) {
+  const langs = String(languages || 'en').split(',').map(l => l.trim().toLowerCase()).filter(l => /^[a-z]{2}$/.test(l));
+  const body = await getJson(`${API}/?languages=${langs.join(',')}&copyright=false`);
+  return (body?.results || []).map(toCandidate).filter(c => c?.publicDomain && c.epubUrl).slice(0, limit);
+}
+
 export async function getCandidate(id) {
   return toCandidate(await getJson(`${API}/${Number(id)}`));
 }

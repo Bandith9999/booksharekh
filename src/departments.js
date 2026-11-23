@@ -21,6 +21,7 @@ export const DEPARTMENTS = [
       ['memory', '', 'Saved settings', 'Settings ដែលបានរក្សា', true],
       ['remember', 'key=value', 'Save a setting', 'រក្សា setting'],
       ['preview', '', 'Sample of every alert', 'គំរូ alert ទាំងអស់', true],
+      ['recommend', '', 'Popular books the site lacks (auto every 3 days)', 'សៀវភៅពេញនិយមដែលវេបសាយមិនទាន់មាន (auto រៀងរាល់ 3 ថ្ងៃ)', true],
     ] },
   { key: 'dev', icon: '💻', name: 'Developer', en: 'Website code: change, check, deploy', km: 'កូដវេបសាយ: កែ ពិនិត្យ deploy',
     agents: ['laravel_developer'],
@@ -42,6 +43,7 @@ export const DEPARTMENTS = [
   { key: 'marketing', icon: '📣', name: 'Marketing', en: 'Books and content for visitors', km: 'សៀវភៅ និង content សម្រាប់អ្នកទស្សនា',
     agents: ['book_researcher', 'book_editor', 'content_creator', 'video_creator'],
     commands: [
+      ['promo', '', '2 promo videos + Khmer captions for TikTok / Facebook', 'វីដេអូ 2 + caption ខ្មែរ សម្រាប់ TikTok / Facebook', true],
       ['requests', '', 'Book requests from visitors', 'សំណើសៀវភៅពីអ្នកទស្សនា', true],
       ['books', '', 'Latest books on the site', 'សៀវភៅថ្មីៗលើវេបសាយ', true],
       ['research', '<title>', 'Find a public-domain book', 'រកសៀវភៅ public domain'],
@@ -85,7 +87,7 @@ export const sendDepartment = (env, chat, key, titles) => {
 };
 
 // Telegram's "/" menu: department commands first, then the rest. Shown only in the owner's chat.
-const MENU_VERSION = '2';
+const MENU_VERSION = '3';
 export async function registerMenu(env) {
   const done = await env.DB.prepare("SELECT value FROM settings WHERE key='bot_menu_version'").first().catch(() => null);
   if (done?.value === `${MENU_VERSION}:${env.BOT_LANGUAGE || 'en'}`) return false;

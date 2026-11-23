@@ -3,6 +3,7 @@
 // The AI never adds actions or tools: only what is declared here can run.
 import { TIERS } from '../ai/model-router.js';
 import { planAction } from './manager.js';
+import { promoAction } from '../marketing/promo.js';
 import { PROMPTS } from './prompts.js';
 import { AGENT_NAMES, PLAN_SCHEMA, QA_SCHEMA, RESEARCH_SCHEMA } from './schemas.js';
 
@@ -18,6 +19,7 @@ export const TOOLS = {
   pdf_inspect: { description: 'Inspect PDF structure with pypdf / PyMuPDF', implemented: false, phase: 5 },
   ffmpeg_render: { description: 'Render vertical video with FFmpeg in GitHub Actions', implemented: false, phase: 5 },
   website_deploy: { description: 'Deploy an approved commit to booksharekh.com over SSH (changed files, backup, health check, rollback)', implemented: true },
+  promo_video: { description: 'Render 9:16 promo videos (book cover + Khmer text) in GitHub Actions and send them to the owner in Telegram; never posts', implemented: true },
   github_pull_request: { description: 'Run the Laravel Developer job on the private website repo: branch, edit, test, open a pull request', implemented: true },
 };
 
@@ -76,10 +78,19 @@ const LIST = [
   {
     name: 'video_creator', title: 'Video Creator', tier: 'fast', phase: 5,
     description: 'Storyboards, subtitles and vertical 9:16 previews from licensed assets.',
-    allowedTools: ['ffmpeg_render', 'github_demo_workflow'],
-    limitations: ['Never posts to TikTok, Facebook or other platforms without approval.'],
+    allowedTools: ['ffmpeg_render', 'github_demo_workflow', 'promo_video'],
+    limitations: ['Never posts to TikTok, Facebook or other platforms: videos and captions go to the owner in Telegram.'],
     maxAttempts: 2, allowFallback: true, maxOutputTokens: 3000, outputSchema: null,
-    actions: { demo_video_job: demoJob('8-second sample-card video') },
+    actions: {
+      demo_video_job: demoJob('8-second sample-card video'),
+      // /promo: Khmer on-screen lines + caption for 1 popular and 1 new book (AI), then the owner approves rendering.
+      write_promo: promoAction,
+      promo_video_job: {
+        kind: 'github_job', tool: 'promo_video', workflow: 'demo', requiresApproval: true, approvalAction: 'create_promo_video',
+        description: 'Render the promo videos in GitHub Actions and send them with captions to you in Telegram. Nothing is posted.',
+        descriptionKm: 'បង្កើតវីដេអូ ហើយផ្ញើមកអ្នកក្នុង Telegram។ មិន post ទេ។',
+      },
+    },
   },
   {
     name: 'laravel_developer', title: 'Laravel Developer', tier: 'code', phase: 6, confidential: true,

@@ -82,6 +82,11 @@ const listOf = body => (Array.isArray(body?.data) ? body.data : []).slice(0, 20)
 }));
 
 export const apiHealth = env => get(env, '/api/ai/health');
+// Books for promo videos: kind 'popular' (most viewed) or 'latest', with cover, link, views, description.
+export async function promoBooks(env, kind, n = 10) {
+  const body = await get(env, '/api/ai/books', { [kind === 'popular' ? 'popular' : 'latest']: n, promo: 1 });
+  return Array.isArray(body?.data) ? body.data.slice(0, 20) : [];
+}
 export async function latestBooks(env, n = 5) { return listOf(await get(env, '/api/ai/books', { latest: Math.min(Math.max(n, 1), 20) })); }
 export async function searchBooks(env, q) { return listOf(await get(env, '/api/ai/books/search', { q: clamp(q, 100) })); }
 

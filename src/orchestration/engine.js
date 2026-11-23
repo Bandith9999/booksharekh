@@ -89,6 +89,26 @@ export async function createDeployTask(env, { userId, sha, preview }) {
   return { id };
 }
 
+// /promo: the Video Creator writes Khmer lines + captions for the chosen books (AI step), then the
+// owner approves rendering (GitHub Actions). Videos and captions come back in Telegram; nothing is posted.
+export async function createPromoTask(env, { userId, books }) {
+  const limited = await rateLimited(env, userId);
+  if (limited) return limited;
+  const id = newId('BSK');
+  await env.DB.prepare('INSERT INTO tasks (id,telegram_user_id,request_text,task_type,proposal,status) VALUES (?,?,?,?,?,?)')
+    .bind(id, String(userId), clamp(`Promo videos: ${books.map(b => `#${b.id} ${b.title}`).join('; ')}`, 2000), 'book_promo', '(writing captions)', 'planning').run();
+  const writeId = await insertStep(env, { taskId: id, agent: 'video_creator', action: 'write_promo', status: 'queued', input: { books } });
+  await insertStep(env, { taskId: id, agent: 'video_creator', action: 'promo_video_job', status: 'pending', dependsOn: [writeId] });
+  await audit(env, id, 'TASK_CREATED', userId, `book_promo ${books.map(b => b.id).join(',')}`);
+  try {
+    await enqueueStep(env, writeId);
+  } catch (e) {
+    await failStep(env, await getTask(env, id), await getAgentTask(env, writeId), e.message);
+    return { id, failed: true };
+  }
+  return { id };
+}
+
 export async function createTask(env, { userId, description, type: forcedType = null }) {
   const limited = await rateLimited(env, userId);
   if (limited) return limited;

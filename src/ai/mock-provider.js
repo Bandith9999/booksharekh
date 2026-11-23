@@ -17,14 +17,23 @@ function managerPlan({ taskType, request }) {
   };
 }
 
+// Video Creator promo scripts (demo text; a real provider writes the Khmer copy).
+function promoScripts({ books = [] }) {
+  return { videos: books.map(b => ({
+    book_id: b.id, hook: 'សៀវភៅល្អៗ សម្រាប់អ្នក', lines: [clamp(b.title, 60), 'អានឥឡូវនេះ'],
+    caption: `[DEMO] ${clamp(b.title, 100)}\nអានលើ BookShareKH\n📖 booksharekh.com`, hashtags: ['#BookShareKH', '#សៀវភៅ', '#Books'],
+  })) };
+}
+
 export const mockProvider = {
   name: 'mock',
   keyName: null,
   modelPattern: /^mock$/,
 
   async generate(env, req) {
-    if (req.agent !== 'manager') throw new AIError(`mock provider has no responder for agent ${req.agent}`, { kind: 'config', provider: 'mock' });
-    const content = JSON.stringify(managerPlan(req.metadata || {}));
+    const responders = { manager: () => managerPlan(req.metadata || {}), video_creator: () => promoScripts(req.metadata || {}) };
+    if (!responders[req.agent]) throw new AIError(`mock provider has no responder for agent ${req.agent}`, { kind: 'config', provider: 'mock' });
+    const content = JSON.stringify(responders[req.agent]());
     return makeResponse({
       provider: 'mock', model: 'mock', content,
       structuredOutput: req.responseSchema ? parseStructured(content, req.responseSchema, 'mock') : undefined,

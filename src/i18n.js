@@ -11,6 +11,8 @@ const NOTES = {
   member: ['NEW MEMBER', 'សមាជិកថ្មី'],
   login: ['LOGIN', 'Login'],
   request: ['BOOK REQUEST', 'សំណើសៀវភៅ'],
+  promo: ['PROMO VIDEO', 'វីដេអូផ្សព្វផ្សាយ'],
+  recommend: ['BOOK IDEAS', 'ណែនាំសៀវភៅ'],
 };
 export const note = (env, kind) => `*** ${pick(env, ...NOTES[kind])} ***`;
 const short = id => `${String(id).slice(0, 17)}…`;
@@ -108,6 +110,18 @@ ${url}` : ''}`),
   ].filter(Boolean).join('\n\n'),
   usersSummary: (env, total, reg, logins) => pick(env, `👥 Total users: ${total}\n🆕 New (24h): ${reg}\n🔑 Logged in (24h): ${logins}`,
     `👥 សរុប ${total} នាក់\n🆕 ថ្មី (24h): ${reg}\n🔑 Login (24h): ${logins}`),
+  // Marketing promo videos (posting on TikTok / Facebook is done by the owner).
+  promoVideo: (env, n, total, b) => `${note(env, 'promo')}\n🎬 ${n}/${total} · ${b.title}${b.author ? ` — ${b.author}` : ''}\n` +
+    pick(env, '👇 Caption in the next message (copy it)', '👇 Caption នៅសារបន្ទាប់ (copy យកទៅ post)'),
+  promoDone: (env, ok, msg) => (ok ? pick(env, '✅ Promo videos ready. Post them on TikTok / Facebook.', '✅ វីដេអូរួចរាល់ — post លើ TikTok / Facebook')
+    : pick(env, `❌ Promo video failed: ${msg}`, `❌ បង្កើតវីដេអូមិនបាន: ${msg}`)),
+  recommend: (env, lines, few) => [note(env, 'recommend'),
+    pick(env, '📈 Popular books the website does not have yet:', '📈 សៀវភៅពេញនិយម ដែលវេបសាយមិនទាន់មាន:'), ...lines, '',
+    pick(env, '🟢 public domain: tap 📥 to import · 🔒 copyright: needs a licence first', '🟢 public domain: ចុច 📥 ដើម្បីនាំចូល · 🔒 មាន copyright: ត្រូវមាន license មុន'),
+    few ? pick(env, '(fewer than 10 found this time)', '(រកឃើញតិចជាង 10 លើកនេះ)') : ''].filter(Boolean).join('\n'),
+  recommendNone: env => pick(env, 'No new book ideas this time: the sources are down or the site already has them.', 'គ្មានសៀវភៅថ្មីសម្រាប់ណែនាំលើកនេះ'),
+  promoNone: env => pick(env, 'No book to promote: all popular and new books were promoted in the last 14 days.', 'គ្មានសៀវភៅថ្មីសម្រាប់ផ្សព្វផ្សាយ (បានធ្វើក្នុង 14 ថ្ងៃមុនរួច)'),
+  promoStarted: env => pick(env, '🎬 Writing Khmer captions…', '🎬 កំពុងសរសេរ caption…'),
   noTopups: env => pick(env, 'No pending top-ups.', 'គ្មាន topup រង់ចាំ'),
   booksHeading: (env, n) => pick(env, `Latest ${n} books:`, `សៀវភៅថ្មីៗ ${n}:`),
   searchHeading: (env, q) => pick(env, `Books matching "${q}":`, `លទ្ធផល "${q}":`),
@@ -165,4 +179,5 @@ export const KM_ACTION = {
   deploy_website: 'Deploy ទៅវេបសាយ?',
   prepare_book_draft: 'រៀបចំ draft?',
   publish_book: 'Publish លើវេបសាយ?',
+  create_promo_video: 'បង្កើតវីដេអូ?',
 };

@@ -2,7 +2,8 @@
 // The webhook only validates, records and enqueues; AI calls and GitHub dispatch run from the queue.
 import { clamp, safeTaskId } from './helpers.js';
 import { addArtifact, audit } from './db.js';
-import { reply } from './telegram.js';
+import { reply, tgForm } from './telegram.js';
+import { markPromoted, promoOf } from './marketing/promo.js';
 import { T } from './i18n.js';
 import { advance } from './orchestration/engine.js';
 import { deployShaOf, prReviewText } from './orchestration/github.js';
@@ -11,6 +12,7 @@ import { handleQueueBatch } from './orchestration/queue-consumer.js';
 import { pollBookRequests } from './books/requests.js';
 import { pollTopups } from './website/topups.js';
 import { pollUsers } from './website/users.js';
+import { pollRecommend } from './marketing/recommend.js';
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 
@@ -42,7 +44,46 @@ async function getJob(env, id) {
   if (!['queued', 'dispatching', 'running'].includes(job.status)) return json({ error: 'not queued' }, 409);
   // Deploy jobs verify they were dispatched for the approved commit.
   const deploy = await env.DB.prepare("SELECT input FROM agent_tasks WHERE task_id=? AND action='deploy_job' AND status='running'").bind(id).first();
-  return json(deploy ? { ...job, deploy_sha: deployShaOf(deploy) } : job);
+  if (deploy) return json({ ...job, deploy_sha: deployShaOf(deploy) });
+  // Promo jobs get the approved books and on-screen text (the same artifact the approval is bound to).
+  if (job.task_type === 'book_promo') {
+    const promo = await promoOf(env, id);
+    return json({ ...job, videos: (promo?.videos || []).map(v => ({ title: v.book.title, author: v.book.author, cover_url: v.book.cover_url, hook: v.hook, lines: v.lines })) });
+  }
+  return json(job);
+}
+
+// The promo job uploads each finished video; the Worker forwards it to the owner with its caption.
+const MAX_VIDEO_BYTES = 48 * 1024 * 1024; // Telegram bot upload limit is 50 MB
+async function receiveVideo(request, env, taskId, index) {
+  const task = await env.DB.prepare("SELECT id,telegram_user_id,task_type,status FROM tasks WHERE id=?").bind(taskId).first();
+  if (!task || task.task_type !== 'book_promo' || task.status !== 'running') return json({ error: 'not a running promo task' }, 409);
+  const promo = await promoOf(env, taskId);
+  const v = promo?.videos?.[index];
+  if (!v) return json({ error: 'bad video index' }, 400);
+  const size = Number(request.headers.get('content-length') || 0);
+  if (size > MAX_VIDEO_BYTES) return json({ error: 'video too large' }, 413);
+  const bytes = await request.arrayBuffer();
+  if (!bytes.byteLength || bytes.byteLength > MAX_VIDEO_BYTES) return json({ error: 'empty or too large' }, 413);
+  // Each video is sent once, even if the runner retries the upload.
+  const claimed = await env.DB.prepare("INSERT OR IGNORE INTO settings (key,value,updated_at) VALUES (?, 'sent', CURRENT_TIMESTAMP)").bind(`promo_sent:${taskId}:${index}`).run();
+  if (claimed.meta?.changes !== 1) return json({ ok: true, duplicate: true });
+  const chat = Number(task.telegram_user_id);
+  const form = new FormData();
+  form.set('chat_id', String(chat));
+  form.set('caption', clamp(T.promoVideo(env, index + 1, promo.videos.length, v.book), 1000));
+  form.set('supports_streaming', 'true');
+  form.set('video', new Blob([bytes], { type: 'video/mp4' }), `booksharekh-${v.book.id}.mp4`);
+  try {
+    await tgForm(env, 'sendVideo', form);
+    await reply(env, chat, v.caption); // caption alone: easy to copy into TikTok / Facebook
+  } catch (e) {
+    await env.DB.prepare('DELETE FROM settings WHERE key=?').bind(`promo_sent:${taskId}:${index}`).run();
+    throw e;
+  }
+  await markPromoted(env, [v.book.id]);
+  await audit(env, taskId, 'PROMO_VIDEO_SENT', 'github-actions', `#${v.book.id} ${clamp(v.book.title, 80)} ${bytes.byteLength} bytes`);
+  return json({ ok: true });
 }
 async function finishJob(request, env) {
   const data = await request.json().catch(() => null);
@@ -88,6 +129,10 @@ async function finishJob(request, env) {
     await reply(env, Number(row.telegram_user_id), T.deployDone(env, state === 'completed', clamp(data.note, 300), url));
     return json({ ok: true });
   }
+  if (row.task_type === 'book_promo') {
+    await reply(env, Number(row.telegram_user_id), T.promoDone(env, state === 'completed', clamp(data.note, 300)));
+    return json({ ok: true });
+  }
   await reply(env, Number(row.telegram_user_id), T.jobDone(env, data.task_id, state, clamp(data.note, 300), url, row.task_type !== 'website_code_change', prUrl));
   return json({ ok: true });
 }
@@ -98,6 +143,11 @@ export default {
     try {
       if (request.method === 'GET' && u.pathname === '/health') return json({ ok: true, service: 'booksharekh-ai-manager' });
       if (request.method === 'POST' && u.pathname === '/telegram') return await telegramWebhook(request, env);
+      const vm = /^\/job-video\/([^/]+)\/(\d)$/.exec(u.pathname);
+      if (vm && request.method === 'POST') {
+        if (!authorizedJob(request, env)) return json({ error: 'unauthorized' }, 401);
+        return safeTaskId(vm[1]) ? await receiveVideo(request, env, vm[1], Number(vm[2])) : json({ error: 'bad id' }, 400);
+      }
       if (u.pathname.startsWith('/job/') && request.method === 'GET') {
         if (!authorizedJob(request, env)) return json({ error: 'unauthorized' }, 401);
         const id = u.pathname.slice(5);
@@ -117,6 +167,7 @@ export default {
   async scheduled(event, env) {
     try { await pollTopups(env); } catch (e) { console.error('top-up poll failed', String(e)); }
     try { await pollUsers(env); } catch (e) { console.error('user activity poll failed', String(e)); }
+    try { await pollRecommend(env, new Date(event?.scheduledTime || Date.now())); } catch (e) { console.error('book recommendations failed', String(e)); }
     try { await pollBookRequests(env); } catch (e) { console.error('book request poll failed', String(e)); }
   },
 };
