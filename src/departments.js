@@ -45,7 +45,7 @@ export const DEPARTMENTS = [
     agents: ['book_researcher', 'book_editor', 'content_creator', 'video_creator'],
     commands: [
       ['promo', '', '1 video about booksharekh.com, Khmer voice + caption', 'វីដេអូ 1 អំពី booksharekh.com មានសំឡេង + caption ខ្មែរ', true],
-      ['poster', '', '1 poster in the website style + caption (Facebook / Instagram)', 'Poster 1 តាមស្ទីលវេបសាយ + caption (Facebook / Instagram)', true],
+      ['poster', '', '1 TikTok photo poster (9:16) with book covers + caption', 'Poster TikTok 1 (9:16) មានគម្របសៀវភៅ + caption', true],
       ['requests', '', 'Book requests from visitors', 'សំណើសៀវភៅពីអ្នកទស្សនា', true],
       ['books', '', 'Latest books on the site', 'សៀវភៅថ្មីៗលើវេបសាយ', true],
       ['research', '<title>', 'Find a public-domain book', 'រកសៀវភៅ public domain'],
@@ -89,7 +89,7 @@ export const sendDepartment = (env, chat, key, titles) => {
 };
 
 // Telegram's "/" menu: department commands first, then the rest. Shown only in the owner's chat.
-const MENU_VERSION = '6';
+const MENU_VERSION = '7';
 export async function registerMenu(env) {
   const done = await env.DB.prepare("SELECT value FROM settings WHERE key='bot_menu_version'").first().catch(() => null);
   if (done?.value === `${MENU_VERSION}:${env.BOT_LANGUAGE || 'en'}`) return false;

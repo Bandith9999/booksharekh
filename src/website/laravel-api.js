@@ -84,6 +84,8 @@ const listOf = body => (Array.isArray(body?.data) ? body.data : []).slice(0, 20)
 }));
 
 export const apiHealth = env => get(env, '/api/ai/health');
+// One public image file from the site through the AI API (the site's firewall blocks GitHub servers).
+export const mediaFile = (env, path) => call(env, 'GET', '/api/ai/media/file', { params: { path }, raw: true, timeout: 20000 });
 // Public marketing images on the site (logo, backgrounds, banners; never payment/QR images).
 // Before the website has /api/ai/media, the two images every page uses are offered.
 const KNOWN_MEDIA = ['dist/img/logo/logo.png', 'dist/img/library-bg.jpg'];

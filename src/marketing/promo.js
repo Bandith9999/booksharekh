@@ -80,16 +80,17 @@ const getSetting = async (env, key) => (await env.DB.prepare('SELECT value FROM 
 const setSetting = (env, key, value) => env.DB.prepare(`INSERT INTO settings (key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP)
     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`).bind(key, String(value)).run();
 
-async function recentCovers(env) {
+// Which covers were already used ({ book id: time }), per kind: videos 7 days, posters 30 days.
+export async function recentCovers(env, key = USED_COVERS, days = COVER_DAYS) {
   let map = {};
-  try { map = JSON.parse(await getSetting(env, USED_COVERS) || '{}'); } catch { /* reset */ }
-  const cutoff = Date.now() - COVER_DAYS * 86400000;
+  try { map = JSON.parse(await getSetting(env, key) || '{}'); } catch { /* reset */ }
+  const cutoff = Date.now() - days * 86400000;
   return Object.fromEntries(Object.entries(map).filter(([, t]) => t > cutoff));
 }
-export async function markPromoted(env, ids) {
-  const map = await recentCovers(env);
+export async function markPromoted(env, ids, key = USED_COVERS, days = COVER_DAYS) {
+  const map = await recentCovers(env, key, days);
   for (const id of ids) map[id] = Date.now();
-  await setSetting(env, USED_COVERS, JSON.stringify(map));
+  await setSetting(env, key, JSON.stringify(map));
 }
 
 // Visuals only: up to 3 covers (2 most viewed + 1 newest), preferring covers not used this week.
