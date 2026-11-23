@@ -254,3 +254,28 @@ test('QA by Gemini: issues are shown in the approval; if Gemini is not set up, Q
   assert.match(JSON.stringify(g.body), /អានសៀវភៅ/, 'Gemini reviewed the poster text');
   assert.match(sent(c2).at(-1).text, /🔎 QA \(Gemini\): ⚠️ គួរកែ:\n• ពាក្យ "ចូលមើល" គួរថា "ចូលមើលឥឡូវនេះ"\n\n👉 បង្កើត poster\?$/);
 });
+
+test('hashtags: no "Khmer book" tags in any language; #BookShareKH and #សៀវភៅបរទេសល្បីៗ always included', async () => {
+  const { cleanHashtags } = await import('../src/marketing/promo.js');
+  assert.deepEqual(cleanHashtags(['#KhmerBooks', 'សៀវភៅខ្មែរ', '#khmer_book', '#Reading', '#BookShareKH', '#សៀវភៅ', 'Book Tok']),
+    ['#BookShareKH', '#សៀវភៅបរទេសល្បីៗ', '#Reading', '#សៀវភៅ', '#BookTok']);
+  assert.deepEqual(cleanHashtags([]), ['#BookShareKH', '#សៀវភៅបរទេសល្បីៗ']);
+});
+
+test('a finished job stays finished even if the "done" message to Telegram fails; Telegram 429 is retried once', async () => {
+  const e = env();
+  let tgCalls = 0;
+  const calls = mockFetch([[/api\.telegram\.org/, () => { tgCalls++; return tgCalls === 1 ? Response.json({ ok: false, parameters: { retry_after: 0 } }, { status: 429 }) : Response.json({ ok: true, result: {} }); }],
+    routes.dispatchOk, promoSite()]);
+  await telegram(e, msg('/poster'));
+  assert.equal(tgCalls, 2, 'the first send hit 429 and was retried');
+  await drain(e);
+  await telegram(e, press(approveButton(calls)));
+  await drain(e);
+  const t = latestTask(e);
+  await worker.fetch(new Request(`https://w.example/job-image/${t.id}/0`, { method: 'POST', headers: { Authorization: 'Bearer cb-secret', 'content-type': 'image/png' }, body: new Uint8Array([1]) }), e);
+  mockFetch([[/api\.telegram\.org/, () => Response.json({ ok: false }, { status: 500 })]]); // Telegram down for the "done" notice
+  const r = await job(e, 'POST', '/job-result', { task_id: t.id, status: 'completed', note: 'Poster sent to Telegram.' });
+  assert.equal(r.status, 200, 'the runner sees success');
+  assert.equal(latestTask(e).status, 'completed');
+});

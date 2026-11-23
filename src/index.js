@@ -143,7 +143,7 @@ async function finishJob(request, env) {
       await env.DB.prepare(`INSERT INTO settings (key,value,updated_at) VALUES ('last_deployed_sha',?,CURRENT_TIMESTAMP)
           ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`).bind(deployedSha).run();
     }
-    await reply(env, Number(row.telegram_user_id), T.deployDone(env, state === 'completed', clamp(data.note, 300), url));
+    await tell(env, row, T.deployDone(env, state === 'completed', clamp(data.note, 300), url));
     return json({ ok: true });
   }
   if (MEDIA_OUT[row.task_type]) {
@@ -151,13 +151,15 @@ async function finishJob(request, env) {
     const got = await env.DB.prepare("SELECT COUNT(*) n FROM settings WHERE key LIKE ?").bind(`promo_sent:${data.task_id}:%`).first();
     const ok = state === 'completed' && got.n > 0;
     const done = row.task_type === 'poster' ? T.posterDone : T.promoDone;
-    await reply(env, Number(row.telegram_user_id), done(env, ok, ok ? '' : state === 'completed'
+    await tell(env, row, done(env, ok, ok ? '' : state === 'completed'
       ? 'nothing was received: the GitHub job on main is out of date (merge the latest code into main)' : clamp(data.note, 300)));
     return json({ ok: true });
   }
-  await reply(env, Number(row.telegram_user_id), T.jobDone(env, data.task_id, state, clamp(data.note, 300), url, row.task_type !== 'website_code_change', prUrl));
+  await tell(env, row, T.jobDone(env, data.task_id, state, clamp(data.note, 300), url, row.task_type !== 'website_code_change', prUrl));
   return json({ ok: true });
 }
+// The result is already recorded: a Telegram hiccup must not turn a finished job into an error.
+const tell = (env, row, text) => reply(env, Number(row.telegram_user_id), text).catch(e => console.error('result notice failed', String(e)));
 
 export default {
   async fetch(request, env) {
