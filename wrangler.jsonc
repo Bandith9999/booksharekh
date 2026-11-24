@@ -72,6 +72,12 @@
 		// the other AIs review in parallel and suggest improvements, then the writer makes the final version.
 		// About 2-3 extra AI calls per job. "false" = the old way (one AI, others only take over at a limit).
 		"AI_TEAMWORK": "true",
+		// Website Operations agent (/admin ops): weekly inspection, Friday 08:00 Phnom Penh by default
+		// (change with "/admin ops schedule fri 08:00"). Rules first; AI (review chain, Gemini first) only
+		// for genre suggestions and new reviews, cached, within these token budgets.
+		"AI_OPS_WEEKLY_TOKENS": "40000",
+		"AI_OPS_MONTHLY_TOKENS": "150000",
+		"AI_OPS_MAX_BATCHES": "4",
 		// QA second opinion: Gemini → Codex → Claude (and never the AI that wrote the work).
 		"AI_REVIEW_CHAIN": "google:gemini-3.8-flash,openai:auto,anthropic:claude-sonnet-5-5",
 

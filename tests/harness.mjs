@@ -7,7 +7,7 @@ import worker from '../src/index.js';
 
 export { worker };
 export const OWNER = 111;
-const MIGRATIONS = ['0001_init.sql', '0002_multi_agent.sql', '0003_settings.sql'].map(f => readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
+const MIGRATIONS = ['0001_init.sql', '0002_multi_agent.sql', '0003_settings.sql', '0004_website_ops.sql'].map(f => readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
 
 export function makeD1() {
   const db = new DatabaseSync(':memory:');

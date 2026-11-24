@@ -6,6 +6,7 @@ import { planAction } from './manager.js';
 import { promoAction } from '../marketing/promo.js';
 import { posterAction } from '../marketing/poster.js';
 import { qaContentAction } from './qa.js';
+import { classifyGenresAction, classifyReviewsAction } from '../ops/actions.js';
 import { PROMPTS } from './prompts.js';
 import { AGENT_NAMES, PLAN_SCHEMA, QA_SCHEMA, RESEARCH_SCHEMA } from './schemas.js';
 
@@ -23,6 +24,7 @@ export const TOOLS = {
   website_deploy: { description: 'Deploy an approved commit to booksharekh.com over SSH (changed files, backup, health check, rollback)', implemented: true },
   poster_render: { description: 'Render a 1080x1350 poster in the website style (HTML + headless Chrome) in GitHub Actions and send it to the owner; never posts', implemented: true },
   promo_video: { description: 'Render 9:16 promo videos (book cover + Khmer text) in GitHub Actions and send them to the owner in Telegram; never posts', implemented: true },
+  website_ops_api: { description: 'Read the website catalog and statistics (/api/ai/ops, read-only); apply only owner-approved, whitelisted, verified changes', implemented: true },
   github_pull_request: { description: 'Run the Laravel Developer job on the private website repo: branch, edit, test, open a pull request', implemented: true },
 };
 
@@ -136,6 +138,14 @@ const LIST = [
     allowedTools: [], limitations: ['QA approval never replaces owner approval.', 'Never receives private website code (free-tier Gemini prompts may be used by Google).'],
     maxAttempts: 2, allowFallback: false, maxOutputTokens: 2000, outputSchema: QA_SCHEMA,
     actions: { review_content: qaContentAction },
+  },
+  {
+    name: 'website_ops', title: 'Website Operations', tier: 'review', phase: 7,
+    description: 'Weekly website inspection: books, genres, authors, files, reviews, media, requests and statistics; prepares corrections for approval, applies and verifies them.',
+    allowedTools: ['website_ops_api'],
+    limitations: ['Rule-based checks first; AI only for genre suggestions and new reviews.', 'Never invents book data, never deletes, never changes prices, money or users.', 'Every change needs the owner approval in Telegram.'],
+    maxAttempts: 1, allowFallback: false, maxOutputTokens: 1500, outputSchema: null,
+    actions: { classify_genres: classifyGenresAction, classify_reviews: classifyReviewsAction },
   },
 ].map(a => ({ ...a, prompt: PROMPTS[a.name] }));
 

@@ -19,7 +19,7 @@ export class WebsiteApiError extends Error {
 
 export const apiConfigured = env => Boolean(env.LARAVEL_API_URL && env.LARAVEL_API_TOKEN);
 
-async function call(env, method, path, { params = {}, json, form, timeout = TIMEOUT_MS, raw = false } = {}) {
+async function call(env, method, path, { params = {}, json, form, timeout = TIMEOUT_MS, raw = false, accept = [] } = {}) {
   if (!apiConfigured(env)) throw new WebsiteApiError('The Laravel API is not connected yet (LARAVEL_API_URL / LARAVEL_API_TOKEN).', 'not_configured');
   const url = new URL(`${String(env.LARAVEL_API_URL).replace(/\/+$/, '')}${path}`);
   if (url.protocol !== 'https:') throw new WebsiteApiError('LARAVEL_API_URL must use https', 'not_configured');
@@ -49,6 +49,8 @@ async function call(env, method, path, { params = {}, json, form, timeout = TIME
   if (r.status >= 500) throw new WebsiteApiError(`Website API error (HTTP ${r.status}).`, 'server');
   if (raw && r.ok) return r;
   const res = await r.json().catch(() => null);
+  // Callers that handle refusals themselves (Website Operations) get { http, ...body }.
+  if (accept.includes(r.status) && res) return { http: r.status, ...res };
   // 409/422: the site refused the request (duplicate, rights, changed files); never retried.
   if (r.status === 409 || r.status === 422) throw new WebsiteApiError(`Website refused: ${clamp(res?.error || res?.message || `HTTP ${r.status}`, 200)}`, 'rejected');
   if (!r.ok || !res) throw new WebsiteApiError(`Unexpected website API response (HTTP ${r.status}).`, 'bad_response');
@@ -119,3 +121,14 @@ export function formatBooks(books, heading, empty = '(no books found)') {
   if (!books.length) return `${heading}\n${empty}`;
   return [heading, ...books.map(b => `• #${b.id} ${b.title}${b.author ? ` — ${b.author}` : ''}${b.status ? ` [${b.status}]` : ''}`)].join('\n');
 }
+
+// ---- Website Operations (abilities ops:read / ops:write) ----
+// Read-only inspection pages and SQL statistics; apply/rollback run only owner-approved changes.
+export const opsBooks = (env, afterId = 0, limit = 200) => get(env, '/api/ai/ops/books', { after_id: Number(afterId) || 0, limit });
+export const opsTaxonomy = env => get(env, '/api/ai/ops/taxonomy');
+export const opsReviews = (env, afterId = 0, limit = 300) => get(env, '/api/ai/ops/reviews', { after_id: Number(afterId) || 0, limit });
+export const opsMedia = env => get(env, '/api/ai/ops/media');
+export const opsStats = env => get(env, '/api/ai/ops/stats');
+// Returns { http, status: applied|conflict|invalid, changes, conflicts } (409/422 are answers, not errors).
+export const opsApply = (env, approvalId, ops) => call(env, 'POST', '/api/ai/ops/apply', { json: { approval_id: approvalId, ops }, timeout: 60000, accept: [200, 409, 422] });
+export const opsRollback = (env, approvalId) => call(env, 'POST', '/api/ai/ops/rollback', { json: { approval_id: approvalId }, timeout: 60000, accept: [200, 409] });
