@@ -15,11 +15,15 @@ const meanVolume = f => Number((sh('ffmpeg', ['-i', f, '-af', 'volumedetect', '-
 // Khmer wrapping never breaks inside a word and keeps lines short.
 const lines = wrapKhmer('យល់ពីខួរក្បាល ហើយគ្រប់គ្រងគំនិតរបស់អ្នក អានសៀវភៅរាប់ពាន់ក្បាល');
 assert.ok(lines.length >= 2 && lines.join('').replace(/\s/g, '') === 'យល់ពីខួរក្បាលហើយគ្រប់គ្រងគំនិតរបស់អ្នកអានសៀវភៅរាប់ពាន់ក្បាល', JSON.stringify(lines));
+// Prices, web addresses and punctuation are never split from their word.
+for (const l of [...wrapKhmer('តម្លៃត្រឹមតែ $0.50 ក្នុងមួយក្បាល', 8), ...wrapKhmer('ចង់អានសៀវភៅល្អៗ តែមិនដឹងរកនៅឯណា?', 8), ...wrapKhmer('ចូលអាន booksharekh.com ឥឡូវនេះ', 8)]) {
+  assert.ok(!/^[?!។.ៗ]|^0\.50|\$$/.test(l), `bad line break: ${l}`);
+}
 
 // A generated cover (not a real book) served from a local file via a data-less https stub is not possible
 // here, so the voiced test uses no covers and the second test uses a public test image.
 const job = {
-  voice: 'km-KH-SreymomNeural',
+  voice: 'km-KH-SreymomNeural', tts: 'gemini', font: 'kdamthmor', body_font: 'battambang', palette: 'ocean', // CI has no Worker: Gemini is skipped, edge-tts speaks
   covers: [], background_url: 'https://booksharekh.com/dist/img/library-bg.jpg', logo_url: 'https://booksharekh.com/dist/img/logo/logo.png',
   scenes: [
     { text: 'ចង់អានសៀវភៅល្អៗ តែមិនដឹងរកនៅឯណា?', voice: 'ចង់អានសៀវភៅល្អៗ តែមិនដឹងរកនៅឯណា?' },

@@ -31,7 +31,7 @@ def ass_text(s):
     return ' '.join(s.split()).replace('\\','/').replace('{','(').replace('}',')')
 
 # Promo video: rendered by scripts/promo_render.mjs (Node: Khmer word wrapping with Intl.Segmenter,
-# Khmer voice-over with edge-tts, bundled Noto Sans Khmer fonts). One video per task.
+# Khmer voice-over from Gemini TTS via the Worker (edge-tts as fallback), Khmer text drawn by Chrome). One video per task.
 def render_promo(i, v):
     job_file=out/('promo%d.json'%i)
     job_file.write_text(json.dumps(v,ensure_ascii=False),encoding='utf-8')
@@ -69,7 +69,7 @@ def api(path, payload=None):
     data=json.dumps(payload).encode() if payload is not None else None
     # Cloudflare blocks the default "Python-urllib" user agent (error 1010), so always send our own.
     # X-Runner-Version: the Worker only hands promo jobs to a runner that has the current renderer.
-    req=urllib.request.Request(root+path,data=data,headers={'Authorization':'Bearer '+secret, 'Content-Type':'application/json','User-Agent':'BookShareKH-GitHub-Runner/1.0','X-Runner-Version':'3'})
+    req=urllib.request.Request(root+path,data=data,headers={'Authorization':'Bearer '+secret, 'Content-Type':'application/json','User-Agent':'BookShareKH-GitHub-Runner/1.0','X-Runner-Version':'5'})
     with urllib.request.urlopen(req,timeout=25) as res:
         return json.loads(res.read())
 

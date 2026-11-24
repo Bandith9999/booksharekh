@@ -1,7 +1,7 @@
 // Telegram commands and button handlers. Every entry point checks the owner first.
 import { clamp, isOwner, parseCommand, parseMemory, parseTaskRef, githubHint } from './helpers.js';
 import { audit, findTask, getAgentOverride, listAgentTasks } from './db.js';
-import { reply, tg } from './telegram.js';
+import { removeMessage, reply, taskReply, tg } from './telegram.js';
 import { AGENTS, TOOLS, isImplemented, validateRegistry } from './agents/registry.js';
 import { chainLabel, cooldownOf, fallbackRoute, freeModels, paidEnabled, resolveChain, resolveRoute, validateRoute } from './ai/model-router.js';
 import { PROVIDER_NAMES, getProvider, normalizeProvider } from './ai/provider-factory.js';
@@ -19,7 +19,7 @@ import { sendSamples } from './samples.js';
 import { nextPromoInput } from './marketing/promo.js';
 import { nextPosterInput } from './marketing/poster.js';
 import { sendRecommendations } from './marketing/recommend.js';
-import { DEPARTMENTS, DEPT_BY_KEY, TAP_COMMANDS, registerMenu, sendDepartment, sendHelp } from './departments.js';
+import { DEPARTMENTS, TAP_COMMANDS, askWhich, deptKey, registerMenu, routeRequest, sendDepartment, sendHelp, takeAsked } from './departments.js';
 
 const short = id => `${id.slice(0, 17)}…`;
 
@@ -177,17 +177,18 @@ export async function diagnostics(env) {
   return lines.join('\n');
 }
 
-async function startImport(env, userId, gutenbergId, requestId) {
-  if (!apiConfigured(env)) return 'The website API is not connected yet, so drafts cannot be created. Install the AI API on booksharekh.com and set LARAVEL_API_TOKEN.';
+async function startImport(env, chat, userId, gutenbergId, requestId) {
+  const say = text => reply(env, chat, text);
+  if (!apiConfigured(env)) return say('The website API is not connected yet, so drafts cannot be created. Install the AI API on booksharekh.com and set LARAVEL_API_TOKEN.');
   const running = await env.DB.prepare(`SELECT id FROM tasks WHERE task_type='book_import' AND request_text LIKE ?
       AND status NOT IN ('completed','failed','cancelled','rejected','plan_failed') LIMIT 1`).bind(`%Project Gutenberg #${gutenbergId}`).first();
-  if (running) return `This book is already being imported (task ${running.id}).`;
+  if (running) return say(`This book is already being imported (task ${running.id}).`);
   const book = await getCandidate(gutenbergId);
-  if (!book?.publicDomain || !book.epubUrl) return 'This title is not marked public domain with an EPUB on Project Gutenberg, so it cannot be imported.';
+  if (!book?.publicDomain || !book.epubUrl) return say('This title is not marked public domain with an EPUB on Project Gutenberg, so it cannot be imported.');
   const r = await createBookImport(env, { userId, book, requestId });
-  if (r.rateLimited) return T.rateLimited(env, r.limit, r.period);
-  if (r.failed) return `Could not start the import (${r.reason}).`;
-  return T.preparing(env, book.title, r.id);
+  if (r.rateLimited) return say(T.rateLimited(env, r.limit, r.period));
+  if (r.failed) return say(`Could not start the import (${r.reason}).`);
+  return taskReply(env, chat, r.id, T.preparing(env, book.title, r.id));
 }
 
 function decisionText(kind, r, env) {
@@ -222,8 +223,14 @@ export async function handleMessage(env, m) {
     case 'start': case 'help': case 'menu':
       await registerMenu(env).catch(e => console.error('setMyCommands failed', String(e)));
       return sendHelp(env, chat);
-    case 'admin': case 'dev': case 'finance': case 'hr': case 'marketing':
-      return sendDepartment(env, chat, c.cmd, agentTitles());
+    case 'admin': case 'dev': case 'developer': case 'finance': case 'hr': case 'marketing': {
+      // Plain words to a department: run the job they describe (or ask which one); none: the card.
+      const dept = deptKey(c.cmd);
+      if (!c.args) return sendDepartment(env, chat, dept, agentTitles());
+      const r = routeRequest(dept, c.args);
+      if (r.ask) return askWhich(env, chat, r.ask, r.text);
+      return handleMessage(env, { ...m, text: `/${r.cmd}${r.args ? ` ${r.args}` : ''}` });
+    }
     case 'remember': {
       const parsed = parseMemory(text);
       if (!parsed) return reply(env, chat, 'Use: /remember video.language=Khmer');
@@ -256,7 +263,7 @@ export async function handleMessage(env, m) {
       const r = await createTask(env, { userId: user, description: c.args });
       if (r.rateLimited) return reply(env, chat, T.rateLimited(env, r.limit, r.period));
       if (r.failed) return;
-      return reply(env, chat, T.taskReceived(env, r.id, r.type));
+      return taskReply(env, chat, r.id, T.taskReceived(env, r.id, r.type));
     }
     case 'taskstatus': {
       const task = await resolveTask(env, chat, c.args, '/taskstatus <task-id>');
@@ -264,13 +271,16 @@ export async function handleMessage(env, m) {
     }
     case 'cancel': {
       const task = await resolveTask(env, chat, c.args, '/cancel <task-id>');
-      return task && reply(env, chat, cancelText(task.id, await cancelTask(env, task.id, user), env));
+      if (!task) return;
+      const r = await cancelTask(env, task.id, user);
+      return r.ok ? taskReply(env, chat, task.id, cancelText(task.id, r, env), { final: true }) : reply(env, chat, cancelText(task.id, r, env));
     }
     case 'resume': {
       const task = await resolveTask(env, chat, c.args, '/resume <task-id>');
       if (!task) return;
       const r = await resumeTask(env, task.id, user);
-      return reply(env, chat, r.ok ? `Resumed ${task.id}. If the quota is still used up it will pause again; nothing switches to paid AI.` : r.reason === 'not_found' ? 'Task not found.' : `Cannot resume: task is ${r.reason.replace('status ', '')}.`);
+      if (r.ok) return taskReply(env, chat, task.id, `Resumed ${task.id}. If the quota is still used up it will pause again; nothing switches to paid AI.`);
+      return reply(env, chat, r.reason === 'not_found' ? 'Task not found.' : `Cannot resume: task is ${r.reason.replace('status ', '')}.`);
     }
     case 'develop': {
       if (!c.args) return reply(env, chat, 'Use: /develop Change the homepage heading to "Welcome to BookShareKH"');
@@ -278,7 +288,7 @@ export async function handleMessage(env, m) {
       const r = await createTask(env, { userId: user, description: c.args, type: 'website_code_change' });
       if (r.rateLimited) return reply(env, chat, T.rateLimited(env, r.limit, r.period));
       if (r.failed) return;
-      return reply(env, chat, T.developReceived(env, r.id));
+      return taskReply(env, chat, r.id, T.developReceived(env, r.id));
     }
     case 'deploy': {
       if (!env.WEBSITE_REPO) return reply(env, chat, 'The website repository is not connected yet (WEBSITE_REPO is not set).');
@@ -320,8 +330,8 @@ export async function handleMessage(env, m) {
     case 'promo': case 'poster': {
       // One at a time per kind, about the website (book covers are only visuals).
       const kind = c.cmd === 'poster'
-        ? { type: 'poster', busy: T.posterBusy, started: T.posterStarted, input: nextPosterInput, create: createPosterTask }
-        : { type: 'book_promo', busy: T.promoBusy, started: T.promoStarted, input: nextPromoInput, create: createPromoTask };
+        ? { type: 'poster', busy: T.posterBusy, started: T.posterStarted, input: e => nextPosterInput(e, c.args), create: createPosterTask }
+        : { type: 'book_promo', busy: T.promoBusy, started: T.promoStarted, input: e => nextPromoInput(e, undefined, c.args), create: createPromoTask };
       try {
         const busy = await env.DB.prepare(`SELECT id FROM tasks WHERE task_type=?
             AND status IN ('planning','queued','awaiting_approval','dispatching','running') AND created_at > datetime('now','-2 hours') LIMIT 1`).bind(kind.type).first();
@@ -329,7 +339,7 @@ export async function handleMessage(env, m) {
         const r = await kind.create(env, { userId: user, input: await kind.input(env) });
         if (r.rateLimited) return reply(env, chat, T.rateLimited(env, r.limit, r.period));
         if (r.failed) return;
-        return reply(env, chat, kind.started(env));
+        return taskReply(env, chat, r.id, kind.started(env));
       } catch (e) {
         if (e instanceof WebsiteApiError) return reply(env, chat, e.message);
         throw e;
@@ -399,16 +409,32 @@ export async function handleCallback(env, q) {
   let m;
   if ((m = /^(ap|rj):(APR-[a-f0-9-]{36})$/.exec(data))) {
     const kind = m[1] === 'ap' ? 'approve' : 'reject';
-    return reply(env, chat, decisionText(kind, kind === 'approve' ? await approveStep(env, m[2], user) : await rejectStep(env, m[2], user), env));
+    const r = kind === 'approve' ? await approveStep(env, m[2], user) : await rejectStep(env, m[2], user);
+    // The tapped approval disappears. "Approved, running" stays until the task's result replaces it;
+    // a rejection is the task's result.
+    await removeMessage(env, q.message);
+    const text = decisionText(kind, r, env);
+    return r.ok ? taskReply(env, chat, r.approval.task_id, text, { final: kind === 'reject' }) : reply(env, chat, text);
   }
-  if ((m = /^cx:(BSK-[a-f0-9-]{36})$/.exec(data))) return reply(env, chat, cancelText(m[1], await cancelTask(env, m[1], user), env));
+  if ((m = /^cx:(BSK-[a-f0-9-]{36})$/.exec(data))) {
+    const r = await cancelTask(env, m[1], user);
+    if (r.reason !== 'running') await removeMessage(env, q.message);
+    return r.ok ? taskReply(env, chat, m[1], cancelText(m[1], r, env), { final: true }) : reply(env, chat, cancelText(m[1], r, env));
+  }
   // Department menu buttons: open a department, or run a command that needs no extra text.
-  if ((m = /^dp:([a-z]+)$/.exec(data))) return m[1] === 'all' ? sendHelp(env, chat) : DEPT_BY_KEY[m[1]] && sendDepartment(env, chat, m[1], agentTitles());
+  if ((m = /^dp:([a-z]+)$/.exec(data))) return m[1] === 'all' ? sendHelp(env, chat) : deptKey(m[1]) && sendDepartment(env, chat, deptKey(m[1]), agentTitles());
+  // "Which one did you mean?" buttons after plain words to a department.
+  if ((m = /^as:(poster|promo|research):([a-f0-9]{12})$/.exec(data))) {
+    const text = await takeAsked(env, m[2]);
+    await removeMessage(env, q.message);
+    if (!text) return reply(env, chat, T.alreadyHandled(env));
+    return handleMessage(env, { from: q.from, chat: q.message.chat, text: `/${m[1]} ${text}` });
+  }
   if ((m = /^run:([a-z]+)$/.exec(data)) && TAP_COMMANDS.has(m[1])) {
     return handleMessage(env, { from: q.from, chat: q.message.chat, text: `/${m[1]}` });
   }
   try {
-    if ((m = /^bi:(\d{1,7}):(\d{1,10})$/.exec(data))) return reply(env, chat, await startImport(env, user, Number(m[1]), Number(m[2]) || null));
+    if ((m = /^bi:(\d{1,7}):(\d{1,10})$/.exec(data))) return await startImport(env, chat, user, Number(m[1]), Number(m[2]) || null);
     if ((m = /^rq:(\d{1,10})$/.exec(data))) {
       const msg = await findForRequest(env, Number(m[1]), user);
       return reply(env, chat, msg.text, msg.reply_markup ? { reply_markup: msg.reply_markup } : {});

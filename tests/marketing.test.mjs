@@ -28,7 +28,7 @@ test('/promo: ONE website video → Khmer script with voice-over → approve →
   assert.equal(lastText(calls), '🎬 កំពុងសរសេរ script វីដេអូ…');
   await drain(e);
   const approval = sent(calls).at(-1);
-  assert.match(approval.text, /^🎬 BookShareKH \[DEMO\]\n1\. ចង់អានសៀវភៅល្អៗ\?\n   🔊 [^\n]+\n2\. [\s\S]*👉 បង្កើតវីដេអូ\?$/, 'shows on-screen text and voice-over');
+  assert.match(approval.text, /^🎬 BookShareKH \[DEMO\]\n🎨 kdamthmor · ocean\n🎙 warm, upbeat[^\n]+\n1\. ចង់អានសៀវភៅល្អៗ\?\n   🔊 [^\n]+\n2\. [\s\S]*👉 បង្កើតវីដេអូ\?$/, 'shows the font, voice style, on-screen text and voice-over');
   assert.doesNotMatch(approval.text, /Emma|Jane Austen/, 'promotes the website, not a book');
   const task = latestTask(e);
   assert.equal(task.task_type, 'book_promo');
@@ -51,9 +51,12 @@ test('/promo: ONE website video → Khmer script with voice-over → approve →
   const old = await job(e, 'GET', `/job/${task.id}`);
   assert.equal(old.status, 409, 'an out-of-date runner on main gets no promo job');
   assert.match((await old.json()).error, /merge the latest code into main/);
-  const got = await (await worker.fetch(new Request(`https://w.example/job/${task.id}`, { headers: { Authorization: 'Bearer cb-secret', 'X-Runner-Version': '2' } }), e)).json();
+  const v4 = await worker.fetch(new Request(`https://w.example/job/${task.id}`, { headers: { Authorization: 'Bearer cb-secret', 'X-Runner-Version': '4' } }), e);
+  assert.equal(v4.status, 409, 'a runner without Gemini voice and Chrome text gets nothing');
+  const got = await (await worker.fetch(new Request(`https://w.example/job/${task.id}`, { headers: { Authorization: 'Bearer cb-secret', 'X-Runner-Version': '5' } }), e)).json();
   assert.equal(got.videos.length, 1);
-  assert.equal(got.videos[0].voice, 'km-KH-SreymomNeural');
+  assert.equal(got.videos[0].voice, 'km-KH-SreymomNeural', 'fallback voice');
+  assert.deepEqual([got.videos[0].tts, got.videos[0].font, got.videos[0].palette], ['gemini', 'kdamthmor', 'ocean']);
   assert.ok(got.videos[0].scenes.every(s => s.text && s.voice));
   assert.deepEqual(got.videos[0].covers, [`${SITE}/covers/1.jpg`, `${SITE}/covers/2.jpg`, `${SITE}/covers/3.jpg`]);
 
@@ -86,7 +89,7 @@ test('the video says when it has no voice-over', async () => {
   await drain(e);
   await upload(e, latestTask(e).id, 0, undefined, 'cb-secret', '?voiced=0');
   const v = Object.fromEntries(calls.find(c => c.url.endsWith('/sendVideo')).body.entries());
-  assert.match(v.caption, /🎬 BookShareKH \[DEMO\] \(គ្មានសំឡេងលើកនេះ\)/);
+  assert.match(v.caption, /🎬 BookShareKH \[DEMO\] \(គ្មានសំឡេង\)/);
 });
 
 test('a promo job that reports "completed" without sending any video is reported as a failure', async () => {
@@ -179,7 +182,7 @@ test('/remember notes reach the promo script writer; /forget deletes a note', as
   await telegram(e, msg('/memory'));
   assert.equal(lastText(calls), 'style = Friendly, short Khmer');
   await telegram(e, msg('/forget promo.goal'));
-  assert.equal(lastText(calls), 'គ្មាន "promo.goal" ទេ។ មើល /memory');
+  assert.equal(lastText(calls), '❓ គ្មាន "promo.goal" · /memory');
   await telegram(e, msg('/forget'));
   assert.match(lastText(calls), /^ប្រើ: \/forget/);
   const after = await promoAction.buildRequest(e, { agentTask: { input: JSON.stringify({ theme: 'x' }) } });
@@ -194,7 +197,7 @@ test('/poster: website poster text → approve → PNG file + caption in Telegra
   assert.equal(lastText(calls), '🖼 កំពុងសរសេរអត្ថបទ poster…');
   await drain(e);
   const approval = sent(calls).at(-1);
-  assert.equal(approval.text, '🖼 Poster [DEMO]\n📚 Emma · Dracula · Ulysses · New Book\n「អានសៀវភៅល្អៗ គ្រប់ពេល」\nសៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ\n✓ តម្លៃ $0.50\n✓ បញ្ចូលលុយតាម KHQR\n[ ចូលមើលឥឡូវនេះ ]\n\n🔎 QA (mock): ✅ ល្អ\n\n👉 បង្កើត poster?');
+  assert.equal(approval.text, '🖼 Poster [DEMO]\n🎨 fan · brand_night · koulen · glow\n「អានសៀវភៅល្អៗ គ្រប់ពេល」\nសៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ\n✓ តម្លៃ $0.50\n✓ បញ្ចូលលុយតាម KHQR\n[ ចូលមើលឥឡូវនេះ ]\n📚\n1. Emma\n2. Dracula\n3. Ulysses\n4. New Book\n\n🔎 QA (mock): ✅ ល្អ\n\n👉 បង្កើត poster?');
   const task = latestTask(e);
   assert.equal(task.task_type, 'poster');
   const qaStep = e.DB.db.prepare("SELECT agent, status FROM agent_tasks WHERE task_id=? AND action='review_content'").get(task.id);
@@ -211,10 +214,12 @@ test('/poster: website poster text → approve → PNG file + caption in Telegra
   await telegram(e, press(approveData));
   await drain(e);
   const runner = v => worker.fetch(new Request(`https://w.example/job/${task.id}`, { headers: { Authorization: 'Bearer cb-secret', 'X-Runner-Version': String(v) } }), e);
-  assert.equal((await runner(2)).status, 409, 'a runner without the poster renderer gets nothing');
-  const got = await (await runner(3)).json();
-  assert.deepEqual(got.posters[0], { headline: 'អានសៀវភៅល្អៗ គ្រប់ពេល', subline: 'សៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ',
-    points: ['តម្លៃ $0.50', 'បញ្ចូលលុយតាម KHQR'], cta: 'ចូលមើលឥឡូវនេះ', covers: [`${SITE}/covers/1.jpg`, `${SITE}/covers/2.jpg`, `${SITE}/covers/4.jpg`, `${SITE}/covers/3.jpg`], background_url: null, logo_url: null });
+  assert.equal((await runner(3)).status, 409, 'a runner without the designs renderer gets nothing');
+  const got = await (await runner(4)).json();
+  assert.deepEqual(got.posters[0], { layout: 'fan', palette: 'brand_night', font: 'koulen', body_font: 'kantumruy', decor: 'glow', kicker: '',
+    headline: 'អានសៀវភៅល្អៗ គ្រប់ពេល', highlight: 'សៀវភៅល្អៗ', subline: 'សៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ',
+    points: ['តម្លៃ $0.50', 'បញ្ចូលលុយតាម KHQR'], cta: 'ចូលមើលឥឡូវនេះ', covers: [`${SITE}/covers/1.jpg`, `${SITE}/covers/2.jpg`, `${SITE}/covers/4.jpg`, `${SITE}/covers/3.jpg`],
+    books: [{ title: 'Emma', note: '' }, { title: 'Dracula', note: '' }, { title: 'Ulysses', note: '' }, { title: 'New Book', note: '' }], background_url: null, logo_url: null });
 
   const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
   const up = (path) => worker.fetch(new Request(`https://w.example${path}`, { method: 'POST', headers: { Authorization: 'Bearer cb-secret', 'content-type': 'image/png' }, body: png }), e);
@@ -230,7 +235,7 @@ test('/poster: website poster text → approve → PNG file + caption in Telegra
 
 test('QA by Gemini: issues are shown in the approval; if Gemini is not set up, QA is skipped and the approval still comes', async () => {
   // Real routing: Claude writes, Gemini reviews. No GEMINI_API_KEY → QA skipped, never blocks.
-  const claudePoster = { title: 'Poster', background: 'none', cover_ids: [2, 3, 1], headline: 'អានសៀវភៅ', subline: 'សៀវភៅច្រើន', points: ['តម្លៃ $0.50', 'KHQR'], cta: 'ចូលមើល', caption: 'x\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#a', '#b'] };
+  const claudePoster = { title: 'Poster', design: { layout: 'grid', palette: 'peach', font: 'dangrek', body_font: 'battambang', decor: 'dots' }, background: 'none', cover_ids: [2, 3, 1], kicker: '', highlight: '', book_notes: [], headline: 'អានសៀវភៅ', subline: 'សៀវភៅច្រើន', points: ['តម្លៃ $0.50', 'KHQR'], cta: 'ចូលមើល', caption: 'x\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#a', '#b'] };
   const anthropic = [/api\.anthropic\.com\/v1\/messages$/, () => Response.json({ model: 'claude-sonnet-5-5', stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 10 }, content: [{ type: 'text', text: JSON.stringify(claudePoster) }] })];
   const base = { AI_PAID_ENABLED: 'true', AI_PROVIDER: 'anthropic', AI_MODEL: 'claude-sonnet-5-5', ANTHROPIC_API_KEY: 'sk-ant-x', AI_REVIEW_PROVIDER: 'google', AI_REVIEW_MODEL: 'gemini-3.8-flash' };
 
@@ -293,10 +298,10 @@ test('website images: the AI picks a background from /api/ai/media; logo always 
   await drain(e);
   const step = JSON.parse(e.DB.db.prepare("SELECT input FROM agent_tasks WHERE action='write_poster' ORDER BY rowid DESC LIMIT 1").get().input);
   assert.deepEqual(step.media.map(m => m.name), ['dist/img/logo/logo.png', 'dist/img/library-bg.jpg'], 'images from another host are dropped');
-  assert.match(sent(calls).at(-1).text, /^🖼 Poster \[DEMO\]\n🏞 library-bg\.jpg\n/, 'the owner sees which photo will be used');
+  assert.match(sent(calls).at(-1).text, /^🖼 Poster \[DEMO\]\n🎨 [a-z_ ·]+\n🏞 library-bg\.jpg\n/, 'the owner sees which photo will be used');
   await telegram(e, press(approveButton(calls)));
   await drain(e);
-  const got = await (await worker.fetch(new Request(`https://w.example/job/${latestTask(e).id}`, { headers: { Authorization: 'Bearer cb-secret', 'X-Runner-Version': '3' } }), e)).json();
+  const got = await (await worker.fetch(new Request(`https://w.example/job/${latestTask(e).id}`, { headers: { Authorization: 'Bearer cb-secret', 'X-Runner-Version': '4' } }), e)).json();
   assert.equal(got.posters[0].background_url, `${SITE}/dist/img/library-bg.jpg`);
   assert.equal(got.posters[0].logo_url, `${SITE}/dist/img/logo/logo.png`);
 

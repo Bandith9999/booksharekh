@@ -18,7 +18,7 @@ export function sampleAlerts(env) {
   return [
     ['Top-up (real one comes as the receipt photo with this caption)', T.topupAlert(env, t), inert(tb.approve, tb.reject)],
     ['Top-up approved', T.topupApproved(env, t, '25.00 USD')],
-    ['Top-up rejected', T.topupRejected(env, t.id)],
+    ['Top-up rejected', T.topupRejected(env, t)],
     ['Top-up already decided', T.topupProblem(env, t.id, 'This top-up has already been approved.')],
     ['New member', T.userActivity(env, members(reg), '230')],
     ['Book purchase', T.purchaseAlert(env, purchaseLines([{ email: 'lyly@example.com', user: 'Lyly.Hong', book_title: 'Pride and Prejudice' }]))],

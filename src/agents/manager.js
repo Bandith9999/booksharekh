@@ -4,6 +4,7 @@ import { addArtifact, memoryContext } from '../db.js';
 import { PROMPTS, wrapUntrusted } from './prompts.js';
 import { PLAN_SCHEMA } from './schemas.js';
 import { T, isKhmer, planLanguageRule } from '../i18n.js';
+import { teamLine } from './team.js';
 
 const TITLES = {
   book_researcher: 'Book Researcher', book_editor: 'EPUB/PDF Editor', content_creator: 'Content Creator',
@@ -15,6 +16,7 @@ export function renderPlan(plan, res, env = null) {
   if (isKhmer(env)) {
     const lines = [`📋 ${plan.summary}`, ...plan.steps.slice(0, 3).map((s, i) => `${i + 1}. ${s.objective}`)];
     if (plan.needs_rights_verification) lines.push('⚖️ ត្រូវពិនិត្យសិទ្ធិ');
+    if (teamLine(res)) lines.push(teamLine(res));
     return lines.join('\n');
   }
   const L = T.plan(env);
@@ -23,11 +25,13 @@ export function renderPlan(plan, res, env = null) {
   if (plan.risks.length) { lines.push('', L.risks); plan.risks.forEach(r => lines.push(`• ${r}`)); }
   const rights = L.rights(plan.needs_rights_verification);
   if (rights) lines.push('', rights);
+  if (teamLine(res)) lines.push(teamLine(res));
   return lines.join('\n');
 }
 
 export const planAction = {
   kind: 'ai',
+  teamwork: true, // Claude writes, the other AIs review, Claude finalises (agents/runner.js)
   description: 'Plan a task and propose specialist steps',
   async buildRequest(env, { task }) {
     const memory = await memoryContext(env);

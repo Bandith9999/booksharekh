@@ -12,9 +12,9 @@ test('/help and unknown commands are in Khmer, commands stay in English', async 
   await telegram(env, msg('/help'));
   const help = lastText(calls);
   assert.match(help, KHMER);
-  for (const cmd of ['/task', '/develop', '/research', '/books', '/website', '/topups', '/users', '/diag']) assert.ok(help.includes(cmd), cmd);
+  for (const cmd of ['/admin', '/developer', '/finance', '/hr', '/marketing']) assert.ok(help.includes(cmd), cmd);
   await telegram(env, msg('/nope'));
-  assert.equal(lastText(calls), 'មិនស្គាល់ command។ សូមវាយ /help');
+  assert.equal(lastText(calls), '❓ មិនស្គាល់ command · /help');
 });
 
 test('task flow in Khmer: received, approval with Khmer buttons, approved — and shorter than English', async () => {

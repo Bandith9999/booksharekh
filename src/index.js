@@ -2,11 +2,12 @@
 // The webhook only validates, records and enqueues; AI calls and GitHub dispatch run from the queue.
 import { clamp, safeTaskId } from './helpers.js';
 import { addArtifact, audit } from './db.js';
-import { reply, tgForm } from './telegram.js';
+import { notifyTaskResult, reply, tgForm } from './telegram.js';
 import { apiConfigured, mediaFile } from './website/laravel-api.js';
 import { markPromoted, promoOf } from './marketing/promo.js';
-import { POSTER_COVERS, POSTER_COVER_DAYS, posterOf } from './marketing/poster.js';
+import { POSTER_COVERS, POSTER_COVER_DAYS, posterJob, posterOf } from './marketing/poster.js';
 import { T } from './i18n.js';
+import { TtsError, geminiSpeech } from './ai/gemini-tts.js';
 import { advance, autoResume } from './orchestration/engine.js';
 import { deployShaOf, prReviewText } from './orchestration/github.js';
 import { handleCallback, handleMessage } from './commands.js';
@@ -50,17 +51,20 @@ async function getJob(env, id, request) {
   if (deploy) return json({ ...job, deploy_sha: deployShaOf(deploy) });
   // Promo jobs get the approved script (the same artifact the approval is bound to) and the voice.
   if (job.task_type === 'book_promo') {
-    // An old runner on main would render an empty video from the new script format.
-    if (Number(request.headers.get('X-Runner-Version') || 0) < 2) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
+    // v5 runner: Gemini voice-over from /job-voice and Khmer text drawn by Chrome in the AI's font.
+    if (Number(request.headers.get('X-Runner-Version') || 0) < 5) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
     const promo = await promoOf(env, id);
+    // Fallback voice (edge-tts) when Gemini TTS is not available.
     const voice = /^km-KH-[A-Za-z]+Neural$/.test(env.PROMO_VOICE || '') ? env.PROMO_VOICE : 'km-KH-SreymomNeural';
-    return json({ ...job, videos: (promo?.videos || []).slice(0, 1).map(v => ({ scenes: v.scenes, covers: v.covers || [], voice, background_url: v.background?.url || null, logo_url: v.logo_url || null })) });
+    return json({ ...job, videos: (promo?.videos || []).slice(0, 1).map(v => ({ scenes: v.scenes, covers: v.covers || [], voice, tts: 'gemini',
+      font: v.design?.font || 'kantumruy', palette: v.design?.palette || 'brand_night',
+      background_url: v.background?.url || null, logo_url: v.logo_url || null })) });
   }
-  // Poster jobs get the approved poster text; they need the runner with the poster renderer (v3).
+  // Poster jobs get the approved poster text and design; they need the runner with the designs renderer (v4).
   if (job.task_type === 'poster') {
-    if (Number(request.headers.get('X-Runner-Version') || 0) < 3) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
+    if (Number(request.headers.get('X-Runner-Version') || 0) < 4) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
     const p = await posterOf(env, id);
-    return json({ ...job, posters: (p?.posters || []).slice(0, 1).map(x => ({ headline: x.headline, subline: x.subline, points: x.points, cta: x.cta, covers: x.covers || [], background_url: x.background?.url || null, logo_url: x.logo_url || null })) });
+    return json({ ...job, posters: (p?.posters || []).slice(0, 1).map(posterJob) });
   }
   return json(job);
 }
@@ -85,6 +89,24 @@ async function jobAsset(env, taskId, url) {
   const bytes = await r.arrayBuffer();
   if (!bytes.byteLength || bytes.byteLength > MAX_ASSET_BYTES) return json({ error: 'image too large' }, 502);
   return new Response(bytes, { headers: { 'content-type': type.split(';')[0], 'cache-control': 'no-store' } });
+}
+
+// Khmer voice-over for one scene of the approved promo script, made with Gemini TTS here so the key
+// stays in Cloudflare. Only the approved text of a running promo task is ever spoken.
+async function jobVoice(env, taskId, index) {
+  const task = await env.DB.prepare('SELECT task_type, status FROM tasks WHERE id=?').bind(taskId).first();
+  if (!task || task.task_type !== 'book_promo' || task.status !== 'running') return json({ error: 'not a running promo task' }, 409);
+  const v = (await promoOf(env, taskId))?.videos?.[0];
+  const scene = v?.scenes?.[index];
+  if (!scene) return json({ error: 'bad scene' }, 400);
+  try {
+    const { wav, voice, model } = await geminiSpeech(env, scene.voice || scene.text, { style: v.voice_style });
+    return new Response(wav, { headers: { 'content-type': 'audio/wav', 'x-tts': `${model}/${voice}`, 'cache-control': 'no-store' } });
+  } catch (e) {
+    if (!(e instanceof TtsError)) throw e;
+    console.error('gemini tts', String(e.message));
+    return json({ error: e.message }, 502);
+  }
 }
 
 // Media jobs upload the finished file; the Worker forwards it to the owner with its caption.
@@ -168,7 +190,7 @@ async function finishJob(request, env) {
       await env.DB.prepare(`INSERT INTO settings (key,value,updated_at) VALUES ('last_deployed_sha',?,CURRENT_TIMESTAMP)
           ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`).bind(deployedSha).run();
     }
-    await tell(env, row, T.deployDone(env, state === 'completed', clamp(data.note, 300), url));
+    await tell(env, data.task_id, row, T.deployDone(env, state === 'completed', clamp(data.note, 300), url));
     return json({ ok: true });
   }
   if (MEDIA_OUT[row.task_type]) {
@@ -176,15 +198,16 @@ async function finishJob(request, env) {
     const got = await env.DB.prepare("SELECT COUNT(*) n FROM settings WHERE key LIKE ?").bind(`promo_sent:${data.task_id}:%`).first();
     const ok = state === 'completed' && got.n > 0;
     const done = row.task_type === 'poster' ? T.posterDone : T.promoDone;
-    await tell(env, row, done(env, ok, ok ? '' : state === 'completed'
+    await tell(env, data.task_id, row, done(env, ok, ok ? '' : state === 'completed'
       ? 'nothing was received: the GitHub job on main is out of date (merge the latest code into main)' : clamp(data.note, 300)));
     return json({ ok: true });
   }
-  await tell(env, row, T.jobDone(env, data.task_id, state, clamp(data.note, 300), url, row.task_type !== 'website_code_change', prUrl));
+  await tell(env, data.task_id, row, T.jobDone(env, data.task_id, state, clamp(data.note, 300), url, row.task_type !== 'website_code_change', prUrl));
   return json({ ok: true });
 }
 // The result is already recorded: a Telegram hiccup must not turn a finished job into an error.
-const tell = (env, row, text) => reply(env, Number(row.telegram_user_id), text).catch(e => console.error('result notice failed', String(e)));
+// It is the task's final message: the earlier progress and approval messages are removed.
+const tell = (env, taskId, row, text) => notifyTaskResult(env, { id: taskId, telegram_user_id: row.telegram_user_id }, text).catch(e => console.error('result notice failed', String(e)));
 
 export default {
   async fetch(request, env) {
@@ -192,6 +215,11 @@ export default {
     try {
       if (request.method === 'GET' && u.pathname === '/health') return json({ ok: true, service: 'booksharekh-ai-manager' });
       if (request.method === 'POST' && u.pathname === '/telegram') return await telegramWebhook(request, env);
+      const vo = /^\/job-voice\/([^/]+)\/(\d)$/.exec(u.pathname);
+      if (vo && request.method === 'GET') {
+        if (!authorizedJob(request, env)) return json({ error: 'unauthorized' }, 401);
+        return safeTaskId(vo[1]) ? await jobVoice(env, vo[1], Number(vo[2])) : json({ error: 'bad id' }, 400);
+      }
       const am = /^\/job-asset\/([^/]+)$/.exec(u.pathname);
       if (am && request.method === 'GET') {
         if (!authorizedJob(request, env)) return json({ error: 'unauthorized' }, 401);

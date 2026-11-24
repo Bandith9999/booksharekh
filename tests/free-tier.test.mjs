@@ -94,7 +94,7 @@ test('Gemini plans a task end-to-end with schema-constrained, locally validated 
   assert.equal(call.init.headers['x-goog-api-key'], 'AIza-SECRET-VALUE');
   assert.equal(call.body.generationConfig.responseMimeType, 'application/json');
   assert.ok(call.body.generationConfig.responseJsonSchema.properties.steps);
-  assert.match(lastText(calls), /Plan by google\/gemini-3\.8-flash/);
+  assert.match(lastText(calls), /📋 Plan · google\/gemini-3\.8-flash/);
   const log = env.DB.db.prepare('SELECT provider,model,input_tokens,output_tokens FROM agent_execution_logs WHERE task_id=?').get(task.id);
   assert.deepEqual({ ...log }, { provider: 'google', model: 'gemini-3.8-flash', input_tokens: 100, output_tokens: 60 });
 
@@ -143,7 +143,7 @@ test('free-tier daily quota pauses the task, tells the owner, never switches to 
   assert.equal(steps(env, task.id)[0].status, 'paused');
   assert.equal(count(calls, GEN), 1, 'quota errors are not retried in a loop');
   assert.equal(count(calls, /anthropic/), 0, 'no paid provider');
-  assert.match(lastText(calls), /paused[\s\S]*No paid AI provider was used[\s\S]*\/resume BSK-/);
+  assert.match(lastText(calls), /Paused[\s\S]*\/resume BSK-/);
   assert.ok(auditEvents(env, task.id).includes('PAUSED'));
 
   exhausted = false;
@@ -212,7 +212,7 @@ test('daily task limit stops new tasks', async () => {
   const calls = mockFetch([routes.telegram, geminiPlan()]);
   await telegram(env, msg('/task one'));
   await telegram(env, msg('/task two'));
-  assert.match(lastText(calls), /Limit reached: at most 1 tasks per day \(UTC\)/);
+  assert.match(lastText(calls), /Limit: 1 tasks per day \(UTC\)/);
   assert.equal(env.DB.db.prepare('SELECT COUNT(*) n FROM tasks').get().n, 1);
 });
 

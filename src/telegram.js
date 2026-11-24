@@ -36,6 +36,54 @@ export const reply =(env, chat_id, text, more = {}) => tg(env, 'sendMessage', { 
 export const notifyTaskOwner = (env, task, text, more = {}) => reply(env, Number(task.telegram_user_id), text, more);
 export const notifyOwner = (env, text, more = {}) => reply(env, Number(env.OWNER_TELEGRAM_ID), text, more);
 
+// ---------- clean chat (owner request) ----------
+// Progress and approval messages of a task are remembered; when the task's final result is sent they
+// are deleted, so the chat keeps only the result. A tapped approval message is deleted right away.
+// Cleanup never blocks or fails the work: Telegram/D1 errors are ignored.
+const TRAIL = 'tg_trail:';
+const trailPrefix = taskId => `${TRAIL}${taskId}:`;
+
+export async function trackMessage(env, taskId, sent) {
+  const m = sent?.result;
+  if (!taskId || !m?.message_id || !m.chat?.id) return;
+  await env.DB.prepare("INSERT OR IGNORE INTO settings (key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP)")
+    .bind(`${trailPrefix(taskId)}${m.chat.id}:${m.message_id}`, 'sent').run().catch(() => {});
+}
+
+export async function clearTrail(env, taskId) {
+  if (!taskId) return;
+  try {
+    const rows = (await env.DB.prepare('SELECT key FROM settings WHERE key LIKE ?').bind(`${trailPrefix(taskId)}%`).all()).results || [];
+    const byChat = new Map();
+    for (const { key } of rows) {
+      const [chat, id] = key.slice(trailPrefix(taskId).length).split(':').map(Number);
+      if (chat && id) byChat.set(chat, [...(byChat.get(chat) || []), id]);
+    }
+    for (const [chat_id, ids] of byChat) {
+      for (let i = 0; i < ids.length; i += 100) await tg(env, 'deleteMessages', { chat_id, message_ids: ids.slice(i, i + 100) }).catch(() => {});
+    }
+    await env.DB.prepare('DELETE FROM settings WHERE key LIKE ?').bind(`${trailPrefix(taskId)}%`).run();
+  } catch (e) { console.error('clear trail failed', String(e)); }
+}
+
+// Delete one message (e.g. the approval whose button was tapped). Telegram refuses deletes of messages
+// older than 48 hours: then at least remove its buttons.
+export async function removeMessage(env, message) {
+  if (!message?.message_id || !message.chat?.id) return;
+  const at = { chat_id: message.chat.id, message_id: message.message_id };
+  await tg(env, 'deleteMessage', at).catch(() => tg(env, 'editMessageReplyMarkup', { ...at, reply_markup: { inline_keyboard: [] } }).catch(() => {}));
+}
+
+// A task message. Progress (default) is remembered and removed later; final: true sends the result and
+// then removes the task's earlier messages.
+export async function taskReply(env, chat, taskId, text, { final = false, ...more } = {}) {
+  const sent = await reply(env, chat, text, more);
+  if (final) await clearTrail(env, taskId); else await trackMessage(env, taskId, sent);
+  return sent;
+}
+export const notifyTaskProgress = (env, task, text, more = {}) => taskReply(env, Number(task.telegram_user_id), task.id, text, more);
+export const notifyTaskResult = (env, task, text, more = {}) => taskReply(env, Number(task.telegram_user_id), task.id, text, { ...more, final: true });
+
 export const keyboards = {
   approval: (approvalId, taskId, env) => {
     const b = T.buttons(env);

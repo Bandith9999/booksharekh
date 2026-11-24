@@ -6,14 +6,16 @@ import { audit, getAgentOverride, getAgentTask, getTask, listAgentTasks, listDep
 import { DEMO_JOB_STEP, getAction, getAgent } from '../agents/registry.js';
 import { runAIAction } from '../agents/runner.js';
 import { appendQa, qaSkippedLine } from '../agents/qa.js';
-import { keyboards, notifyTaskOwner } from '../telegram.js';
+import { keyboards, notifyTaskProgress, notifyTaskResult } from '../telegram.js';
 import { KM_ACTION, T, isKhmer } from '../i18n.js';
 import { decide, requestApproval, revokeOpenApprovals } from './approvals.js';
 import { closePullRequest, jobPayload, mergePayload, runGithubJob, runGithubMerge } from './github.js';
 import { draftPayload, publishPayload, runBookDraft, runBookPublish } from '../books/importer.js';
 import { SQL_NOW, TASK, isTerminal, transition } from './state-machine.js';
 
-const notify = (env, task, text, more) => notifyTaskOwner(env, task, text, more).catch(e => console.error('notify failed', String(e)));
+// Progress messages (approvals, pauses) are removed when the task's final result (done/failed) is sent.
+const notify = (env, task, text, more) => notifyTaskProgress(env, task, text, more).catch(e => console.error('notify failed', String(e)));
+const notifyFinal = (env, task, text, more) => notifyTaskResult(env, task, text, more).catch(e => console.error('notify failed', String(e)));
 
 // ---------- queue ----------
 export const stepMessage = agentTaskId => ({ v: 1, type: 'run_agent_task', agentTaskId });
@@ -258,7 +260,7 @@ async function failStep(env, task, at, message) {
   await cancelOpenSteps(env, task.id);
   await revokeOpenApprovals(env, task.id);
   await audit(env, task.id, planning ? 'PLAN_FAILED' : 'STEP_FAILED', 'worker', `${at.agent}.${at.action}: ${message}`);
-  await notify(env, task, planning
+  await notifyFinal(env, task, planning
     ? T.planFailed(env, task, clamp(message, 400))
     : T.stepFailed(env, task, `${at.agent}.${at.action}`, clamp(message, 400)));
 }
@@ -324,7 +326,7 @@ export async function handleDeadLetter(env, agentTaskId) {
     await transition(env.DB, 'tasks', task.id, 'failed', { set: { result_note: message } });
     await cancelOpenSteps(env, task.id);
     await revokeOpenApprovals(env, task.id);
-    await notify(env, task, T.stepFailed(env, task, `${at.agent}.${at.action}`, message));
+    await notifyFinal(env, task, T.stepFailed(env, task, `${at.agent}.${at.action}`, message));
   }
   await audit(env, at.task_id, 'DEAD_LETTER', 'queue', `${at.agent}.${at.action}`);
 }

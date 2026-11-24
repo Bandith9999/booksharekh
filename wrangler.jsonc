@@ -41,6 +41,11 @@
 		// secret LARAVEL_API_TOKEN.
 		// Telegram messages: "km" = short Khmer (commands and technical words stay English); "en" = English.
 		"BOT_LANGUAGE": "km",
+		// Promo video voice-over: Gemini text-to-speech with the secret GEMINI_API_KEY (Google AI Studio).
+		// Voice: one of Google's prebuilt voices (Sulafat = warm, Achird = friendly, Kore = firm, Aoede = breezy, …).
+		// If Gemini is unavailable, the video uses edge-tts (km-KH-SreymomNeural), or no voice.
+		"PROMO_TTS_VOICE": "Sulafat",
+		"PROMO_TTS_MODEL": "gemini-3.8-flash-tts",
 		"WEBSITE_URL": "https://booksharekh.com",
 		// Book searches return only editions in these languages (2-letter codes).
 		"BOOK_LANGUAGES": "en",
@@ -63,6 +68,10 @@
 		// openai:auto = the newest GPT "Sol" model this key can use (Codex family), found automatically.
 		// Writing, planning, Khmer copy: Claude → Codex → Gemini.
 		"AI_DEFAULT_CHAIN": "anthropic:claude-sonnet-5-5,openai:auto,google:gemini-3.8-flash",
+		// Teamwork (owner request 2026-11-24) for plans, posters and videos: the first AI in the chain writes,
+		// the other AIs review in parallel and suggest improvements, then the writer makes the final version.
+		// About 2-3 extra AI calls per job. "false" = the old way (one AI, others only take over at a limit).
+		"AI_TEAMWORK": "true",
 		// QA second opinion: Gemini → Codex → Claude (and never the AI that wrote the work).
 		"AI_REVIEW_CHAIN": "google:gemini-3.8-flash,openai:auto,anthropic:claude-sonnet-5-5",
 

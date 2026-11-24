@@ -10,7 +10,8 @@ import { pickOpenAIModel } from '../src/ai/openai-provider.js';
 import { autoResume } from '../src/orchestration/engine.js';
 
 const LIVE = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8').split('\n').filter(l => !l.trim().startsWith('//')).join('\n')).vars;
-const env = (more = {}) => makeEnv({ ...LIVE, OWNER_TELEGRAM_ID: '111', AI_PROVIDER: undefined, BOT_LANGUAGE: 'en', ANTHROPIC_API_KEY: 'sk-ant-x', OPENAI_API_KEY: 'sk-oa-x', GEMINI_API_KEY: 'g-x', ...more });
+// These tests are about takeover at a limit; teamwork (review + final) is tested in teamwork.test.mjs.
+const env = (more = {}) => makeEnv({ ...LIVE, OWNER_TELEGRAM_ID: '111', AI_PROVIDER: undefined, BOT_LANGUAGE: 'en', ANTHROPIC_API_KEY: 'sk-ant-x', OPENAI_API_KEY: 'sk-oa-x', GEMINI_API_KEY: 'g-x', AI_TEAMWORK: 'false', ...more });
 
 const json = (body, status = 200, headers = {}) => Response.json(body, { status, headers });
 const claude = (fn) => [/api\.anthropic\.com\/v1\/messages$/, fn];
@@ -80,7 +81,7 @@ test('all three at their limits → task pauses and resumes by itself after the 
   // Whichever rest ends first: Claude's 1 h, or Gemini's quota reset at midnight Pacific (can be sooner late at night).
   const expected = Math.min(Date.now() + 3600000, nextMidnight('America/Los_Angeles'));
   assert.ok(Math.abs(resumeAt - expected) < 5000, 'resumes when the first AI is free again');
-  assert.match(sent(calls).at(-1).text, /^⏸ All AIs are at their limits\. Work continues automatically at \d\d\/\d\d \d\d:\d\d/);
+  assert.match(sent(calls).at(-1).text, /^⏸ All AIs at their limits\n▶️ Continues at \d\d\/\d\d \d\d:\d\d/);
 
   assert.deepEqual(await autoResume(e, Date.now()), { resumed: 0 }, 'not before the time');
   // The hour passes: Claude's rest is over.

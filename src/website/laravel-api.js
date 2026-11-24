@@ -109,6 +109,11 @@ export async function promoBooks(env, kind, n = 10) {
 }
 export async function latestBooks(env, n = 5) { return listOf(await get(env, '/api/ai/books', { latest: Math.min(Math.max(n, 1), 20) })); }
 export async function searchBooks(env, q) { return listOf(await get(env, '/api/ai/books/search', { q: clamp(q, 100) })); }
+// Search with the promo fields (cover). Books without a cover are dropped by the caller.
+export async function searchPromoBooks(env, q) {
+  const body = await get(env, '/api/ai/books/search', { q: clamp(q, 100), promo: 1 });
+  return Array.isArray(body?.data) ? body.data.slice(0, 20) : [];
+}
 
 export function formatBooks(books, heading, empty = '(no books found)') {
   if (!books.length) return `${heading}\n${empty}`;

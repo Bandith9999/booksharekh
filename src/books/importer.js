@@ -2,7 +2,7 @@
 import { clamp } from '../helpers.js';
 import { parseJson } from '../db.js';
 import { consumeStepApproval, finishApproval, releaseApproval } from '../orchestration/approvals.js';
-import { notifyTaskOwner } from '../telegram.js';
+import { notifyTaskResult } from '../telegram.js';
 import { createDraft, publishDraft, updateRequest, uploadDraftFile } from '../website/laravel-api.js';
 import { downloadFile, getCandidate } from './gutenberg.js';
 import { T } from '../i18n.js';
@@ -86,7 +86,7 @@ export async function runBookPublish(env, task, step) {
         requestNote = T.requestDone(env, prep.request_id);
       } catch (e) { requestNote = `\n⚠️ Could not mark request #${prep.request_id} done: ${e.message}`; }
     }
-    await notifyTaskOwner(env, task, T.published(env, prep, res.book.id, res.book.slug, requestNote))
+    await notifyTaskResult(env, task, T.published(env, prep, res.book.id, res.book.slug, requestNote))
       .catch(() => {});
     return { book_id: res.book.id, slug: res.book.slug ?? null };
   });
