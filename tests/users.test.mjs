@@ -77,7 +77,7 @@ test('/preview sends a sample of every alert with inert buttons, owner only', as
   await telegram(e, msg('/preview'));
   const msgs = sent(calls);
   assert.equal(msgs.length, 13, 'intro + 12 samples');
-  assert.match(msgs[0].text, /^🧪 Preview: 12 sample alerts/);
+  assert.match(msgs[0].text, /^🧪 គំរូ alert 12/);
   assert.match(msgs[1].text, /^💰 Finance · \*\*\* បញ្ចូលប្រាក់ \*\*\*/);
   assert.match(msgs[5].text, /^👥 HR · \*\*\* សមាជិកថ្មី \*\*\*\n🆕 lyly@example\.com · Lyly\.Hong/);
   const buttons = msgs.flatMap(m => m.reply_markup?.inline_keyboard.flat() ?? []);

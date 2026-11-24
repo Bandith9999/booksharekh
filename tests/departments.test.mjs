@@ -33,7 +33,7 @@ test('department card: AI staff, examples and tap buttons that run the job', asy
   await telegram(env, msg('/dev'));
   assert.match(lastText(calls), /^💻 Developer/, 'the old /dev still opens the Developer');
   await telegram(env, press('run:status'));
-  assert.equal(lastText(calls), 'No tasks yet.');
+  assert.equal(lastText(calls), '📭 មិនទាន់មានការងារ។');
   const before = sent(calls).length;
   await telegram(env, press('run:deploy', 999));
   await telegram(env, press('run:task'));

@@ -270,5 +270,5 @@ test('a paused task can be cancelled', async () => {
   assert.match(lastText(calls), /Cancelled/);
   assert.deepEqual(steps(env, task.id).map(s => s.status), ['cancelled', 'cancelled']);
   await telegram(env, msg(`/resume ${task.id}`));
-  assert.match(lastText(calls), /Cannot resume: task is cancelled/);
+  assert.match(lastText(calls), /Cannot resume \(cancelled\)/);
 });

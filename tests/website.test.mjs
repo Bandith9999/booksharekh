@@ -79,7 +79,7 @@ test('/develop is refused until the website repository is connected', async () =
   const env = makeEnv();
   const calls = mockFetch([routes.telegram]);
   await telegram(env, msg('/develop Change the homepage heading'));
-  assert.match(lastText(calls), /website repository is not connected yet/);
+  assert.match(lastText(calls), /Website repository not connected/);
   assert.equal(latestTask(env), undefined);
 });
 

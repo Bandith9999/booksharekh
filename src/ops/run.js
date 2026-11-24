@@ -10,6 +10,7 @@ import { checkBooks, checkMedia, checkRequests, checkReviews, checkTaxonomy, dev
 import { classifyReviews, suggestGenres } from './ai.js';
 import { cacheGet, cachePut, saveFindings } from './store.js';
 import { sendWeeklySummary } from './telegram.js';
+import { opsText } from './i18n.js';
 
 // ---------- schedule ----------
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
@@ -28,7 +29,7 @@ export function parseSchedule(text, cur = DEFAULT_SCHEDULE) {
   if (!m || !DAYS.includes(m[1]) || Number(m[2]) > 23 || Number(m[3] || 0) > 59) return null;
   return { day: DAYS.indexOf(m[1]), hour: Number(m[2]), minute: Number(m[3] || 0), enabled: true };
 }
-export const scheduleLabel = s => `${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][s.day]} ${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')} (Phnom Penh)${s.enabled ? '' : ' · off'}`;
+export const scheduleLabel = (s, env = null) => { const L = opsText(env); return `${L.days[s.day]} ${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')} (${L.tz})${s.enabled ? '' : ` · ${L.off}`}`; };
 
 // The run of this week is due once the scheduled day and time have passed (Phnom Penh time).
 export function dueKey(schedule, now = Date.now()) {
@@ -94,7 +95,7 @@ async function youtubeChecks(env, ids, max = 40) {
   return out;
 }
 
-async function healthFindings(env, books, stats) {
+async function healthFindings(env, books, stats, L) {
   const out = [];
   const site = await checkWebsite(env).catch(() => null);
   for (const x of site?.findings || []) {
@@ -103,9 +104,9 @@ async function healthFindings(env, books, stats) {
   // A sample of book pages must open (newest 5).
   for (const b of books.filter(b => b.slug).slice(-5)) {
     const r = await fetch(`${siteUrl(env)}/book/${encodeURIComponent(b.slug)}`, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(10000) }).catch(() => null);
-    if (!r || r.status >= 400) out.push({ kind: 'page_broken', area: 'health', ref: `page:${b.slug}`, line: `Book page error ${r ? `HTTP ${r.status}` : 'no answer'} · /book/${clamp(b.slug, 60)}`, risk: 'high', op: null });
+    if (!r || r.status >= 400) out.push({ kind: 'page_broken', area: 'health', ref: `page:${b.slug}`, line: L.page_broken(r ? `HTTP ${r.status}` : L.no_answer, clamp(b.slug, 60)), risk: 'high', op: null });
   }
-  if (stats?.failed_jobs > 0) out.push({ kind: 'failed_jobs', area: 'health', ref: `failed_jobs:${stats.failed_jobs}`, line: `${stats.failed_jobs} failed background job(s)`, risk: 'medium', op: null });
+  if (stats?.failed_jobs > 0) out.push({ kind: 'failed_jobs', area: 'health', ref: `failed_jobs:${stats.failed_jobs}`, line: L.failed_jobs(stats.failed_jobs), risk: 'medium', op: null });
   return out;
 }
 
@@ -122,17 +123,18 @@ export async function runInspection(env, { trigger = 'schedule' } = {}) {
       pages(after => opsBooks(env, after)), opsTaxonomy(env), pages(after => opsReviews(env, after), 20), opsMedia(env), opsStats(env), allRequests(env)]);
 
     // 1. Rules (no AI).
-    const rev = checkReviews(reviews);
-    const med = checkMedia(media);
-    const findings = [...checkBooks(books, taxonomy), ...checkTaxonomy(taxonomy), ...rev.findings, ...med.findings, ...checkRequests(requests, books)];
-    for (const id of await youtubeChecks(env, med.youtubeIds)) findings.push({ kind: 'media_unavailable', area: 'media', ref: `yt:${id}`, line: `YouTube video unavailable · ${id}`, risk: 'medium', op: null });
-    findings.push(...await healthFindings(env, books, stats));
+    const L = opsText(env);
+    const rev = checkReviews(reviews, L);
+    const med = checkMedia(media, L);
+    const findings = [...checkBooks(books, taxonomy, L), ...checkTaxonomy(taxonomy, L), ...rev.findings, ...med.findings, ...checkRequests(requests, books, L)];
+    for (const id of await youtubeChecks(env, med.youtubeIds)) findings.push({ kind: 'media_unavailable', area: 'media', ref: `yt:${id}`, line: L.media_unavailable(id), risk: 'medium', op: null });
+    findings.push(...await healthFindings(env, books, stats, L));
 
     // 2. AI only where meaning matters, only for new or changed records.
     const g = await suggestGenres(env, task, genreCandidates(books, taxonomy), taxonomy);
     const r = await classifyReviews(env, task, reviews.filter(x => !rev.flagged.has(x.id)));
     findings.push(...g.findings, ...r.findings);
-    findings.push(...devRecommendations({ findings, stats }));
+    findings.push(...devRecommendations({ findings, stats }, L));
 
     // 3. Save: unchanged findings are not new; decided ones are not proposed again.
     const saved = await saveFindings(env, run.id, findings);
@@ -154,7 +156,7 @@ export async function runInspection(env, { trigger = 'schedule' } = {}) {
     await audit(env, taskId, 'OPS_RUN_FAILED', 'system', msg);
     if (trigger === 'manual' || e instanceof WebsiteApiError) {
       const { notifyOwner } = await import('../telegram.js');
-      await notifyOwner(env, `⚠️ Website Operations: inspection failed\n${msg}`).catch(() => {});
+      await notifyOwner(env, `⚠️ ${opsText(env).runFailed}\n${msg}`).catch(() => {});
     }
     return { runId: run.id, failed: msg };
   }

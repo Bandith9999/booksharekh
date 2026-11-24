@@ -95,11 +95,11 @@
 		// Spending cap. 100,000 tokens/day on Claude Sonnet 5.5 is at most about $1/day even if every token
 		// were output ($10 per million). Daily limits pause tasks; per-minute limits retry later.
 		// Also set a monthly limit in the Claude Console (Plans & Billing) as a second guard.
-		"AI_MAX_REQUESTS_PER_MINUTE": "5",
-		"AI_MAX_REQUESTS_PER_DAY": "60",
+		"AI_MAX_REQUESTS_PER_MINUTE": "10",
+		"AI_MAX_REQUESTS_PER_DAY": "150",
 		"DAILY_TASK_LIMIT": "150",
 		"RECOMMEND_EVERY_DAYS": "3",
-		"TASK_RATE_LIMIT_PER_HOUR": "10",
+		"TASK_RATE_LIMIT_PER_HOUR": "20",
 		"TASK_TOKEN_BUDGET": "20000",
 		"DAILY_TOKEN_BUDGET": "100000",
 		"APPROVAL_TTL_HOURS": "24"

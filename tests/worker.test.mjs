@@ -81,7 +81,7 @@ test('duplicate Telegram update is processed once', async () => {
 test('/task without text shows usage; /rememberX is not treated as /remember', async () => {
   const env = makeEnv(); const calls = mockFetch([routes.telegram]);
   await telegram(env, msg('/task'));
-  assert.match(lastText(calls), /^Use: \/task/);
+  assert.match(lastText(calls), /^Use: \/admin/);
   assert.equal(latestTask(env), undefined);
   await telegram(env, msg('/rememberfoo=bar'));
   assert.match(lastText(calls), /Unknown command/);

@@ -217,3 +217,18 @@ test('/admin ops opens the Website Operations menu; sections are one line per fi
   await telegram(e, msg('/admin ops schedule sat 09:30'));
   assert.equal(sent(calls).at(-1).text, 'Weekly inspection: Saturday 09:30 (Phnom Penh)');
 });
+
+test('Khmer bot: Website Operations messages are Khmer, technical words stay English', async () => {
+  const e = env({ BOT_LANGUAGE: 'km' });
+  const calls = mockFetch([routes.telegram, website(fixture()).route]);
+  await runInspection(e, { trigger: 'schedule' });
+  const s = sent(calls).at(-1);
+  assert.match(s.text, /^Website Operations \| ប្រចាំសប្តាហ៍\n\nសៀវភៅបានពិនិត្យ: 2\n/);
+  assert.match(s.text, /ការកែតម្រូវរង់ចាំ: \d+ \(សុវត្ថិភាព \d+\)\nបញ្ហាសម្រាប់ Developer: \d+/);
+  assert.equal(s.reply_markup.inline_keyboard[0][0].text, 'ពិនិត្យ');
+  const line = findings(e, "kind='title_spacing'")[0].line;
+  assert.match(line, /^ដកឃ្លាចំណងជើង · /);
+  assert.match(findings(e, "kind='file_missing'")[0].line, /^គ្មាន PDF ឬ EPUB · /, 'PDF/EPUB stay English');
+  await telegram(e, msg('/admin ops schedule fri 08:00'));
+  assert.equal(sent(calls).at(-1).text, 'ពិនិត្យប្រចាំសប្តាហ៍: ថ្ងៃសុក្រ 08:00 (ម៉ោងភ្នំពេញ)');
+});

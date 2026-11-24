@@ -10,6 +10,7 @@ import { classifyGenresAction, classifyReviewsAction } from './actions.js';
 import { runAIAction } from '../agents/runner.js';
 import { cacheGet, cachePut } from './store.js';
 import { normKey } from './checks.js';
+import { opsText } from './i18n.js';
 
 import { GENRE_BATCH, REVIEW_BATCH } from './actions.js';
 export const opsBudgets = env => ({
@@ -55,6 +56,7 @@ async function ask(env, task, actionName, n, payload) {
 
 // Returns { findings, sent, cached, skipped }.
 export async function suggestGenres(env, task, books, taxonomy) {
+  const L = opsText(env);
   const genres = (taxonomy.genres || []).filter(g => !/^\s*$/.test(g.name));
   const known = new Map(genres.map(g => [g.id, g]));
   const genreSig = await sha256Hex(genres.map(g => `${g.id}:${normKey(g.name)}`).join('|'));
@@ -63,7 +65,7 @@ export async function suggestGenres(env, task, books, taxonomy) {
   for (const b of books) {
     const fp = await sha256Hex([b.title, b.author, clamp(b.description, 200), (b.genre_ids || []).join(','), genreSig].join('|'));
     const hit = await cacheGet(env, `genre:${b.id}`, fp);
-    if (hit) { cached++; if (hit.genre_ids?.length) findings.push(genreFinding(b, hit, known)); continue; }
+    if (hit) { cached++; if (hit.genre_ids?.length) findings.push(genreFinding(b, hit, known, L)); continue; }
     todo.push({ b, fp });
   }
   let sent = 0, n = 0;
@@ -81,31 +83,32 @@ export async function suggestGenres(env, task, books, taxonomy) {
       const ids = [...new Set((it?.genre_ids || []).map(Number).filter(id => known.has(id)))].slice(0, 3);
       const value = { genre_ids: it?.confidence === 'low' ? [] : ids, confidence: it?.confidence || 'low' };
       await cachePut(env, `genre:${b.id}`, fp, value);
-      if (value.genre_ids.length) findings.push(genreFinding(b, value, known));
+      if (value.genre_ids.length) findings.push(genreFinding(b, value, known, L));
     }
   }
   return { findings, sent, cached, skipped: Math.max(0, todo.length - sent) };
 }
 
-function genreFinding(b, v, known) {
+function genreFinding(b, v, known, L) {
   const before = [...(b.genre_ids || [])].sort((x, y) => x - y);
   const after = [...new Set(v.genre_ids)].sort((x, y) => x - y);
-  const names = ids => ids.map(id => known.get(id)?.name || `#${id}`).join(', ') || 'none';
+  const names = ids => ids.map(id => known.get(id)?.name || `#${id}`).join(', ') || L.none;
   return {
     kind: 'genre_suggest', area: 'genres', ref: `book:${b.id}`, source: 'ai', risk: v.confidence === 'high' ? 'low' : 'medium', safe: false,
-    line: `Genre · "${clamp(b.title, 50)}" · ${names(before)} → ${names(after)}`,
+    line: L.genre_suggest(`"${clamp(b.title, 50)}"`, names(before), names(after)),
     op: { op: 'book.genres', target: b.id, before, after },
   };
 }
 
 export async function classifyReviews(env, task, reviews) {
+  const L = opsText(env);
   const todo = [], findings = [];
   let cached = 0;
   for (const r of reviews) {
     if (String(r.comment || '').trim().length < 3) continue;
     const fp = await sha256Hex(`${r.rating}|${r.comment}`);
     const hit = await cacheGet(env, `review:${r.id}`, fp);
-    if (hit) { cached++; if (hit.label !== 'ok') findings.push(reviewFinding(r, hit.label)); continue; }
+    if (hit) { cached++; if (hit.label !== 'ok') findings.push(reviewFinding(r, hit.label, L)); continue; }
     todo.push({ r, fp });
   }
   let sent = 0, n = 0;
@@ -120,11 +123,11 @@ export async function classifyReviews(env, task, reviews) {
     for (const { r, fp } of part) {
       const label = ['spam', 'offensive'].includes(byId.get(r.id)) ? byId.get(r.id) : 'ok';
       await cachePut(env, `review:${r.id}`, fp, { label });
-      if (label !== 'ok') findings.push(reviewFinding(r, label));
+      if (label !== 'ok') findings.push(reviewFinding(r, label, L));
     }
   }
   return { findings, sent, cached, skipped: Math.max(0, todo.length - sent) };
 }
-const reviewFinding = (r, label) => ({ kind: 'review_flag', area: 'reviews', ref: `review:${r.id}`, source: 'ai', risk: label === 'offensive' ? 'high' : 'medium', safe: false,
-  line: `Review #${r.id} (${r.rating}★) · ${label} · "${clamp(r.comment, 60)}"`, op: null });
+const reviewFinding = (r, label, L) => ({ kind: 'review_flag', area: 'reviews', ref: `review:${r.id}`, source: 'ai', risk: label === 'offensive' ? 'high' : 'medium', safe: false,
+  line: L.review_flag(r.id, r.rating, L.review_why[label === 'offensive' ? 'offensive_ai' : label] || label, `"${clamp(r.comment, 60)}"`), op: null });
 

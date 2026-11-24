@@ -179,15 +179,15 @@ export async function diagnostics(env) {
 
 async function startImport(env, chat, userId, gutenbergId, requestId) {
   const say = text => reply(env, chat, text);
-  if (!apiConfigured(env)) return say('The website API is not connected yet, so drafts cannot be created. Install the AI API on booksharekh.com and set LARAVEL_API_TOKEN.');
+  if (!apiConfigured(env)) return say(T.importNoApi(env));
   const running = await env.DB.prepare(`SELECT id FROM tasks WHERE task_type='book_import' AND request_text LIKE ?
       AND status NOT IN ('completed','failed','cancelled','rejected','plan_failed') LIMIT 1`).bind(`%Project Gutenberg #${gutenbergId}`).first();
-  if (running) return say(`This book is already being imported (task ${running.id}).`);
+  if (running) return say(T.importRunning(env, running.id));
   const book = await getCandidate(gutenbergId);
-  if (!book?.publicDomain || !book.epubUrl) return say('This title is not marked public domain with an EPUB on Project Gutenberg, so it cannot be imported.');
+  if (!book?.publicDomain || !book.epubUrl) return say(T.importNotPd(env));
   const r = await createBookImport(env, { userId, book, requestId });
   if (r.rateLimited) return say(T.rateLimited(env, r.limit, r.period));
-  if (r.failed) return say(`Could not start the import (${r.reason}).`);
+  if (r.failed) return say(T.importFailed(env, r.reason));
   return taskReply(env, chat, r.id, T.preparing(env, book.title, r.id));
 }
 
@@ -207,7 +207,7 @@ function cancelText(taskId, r, env) {
 async function resolveTask(env, chat, ref, usage) {
   const parsed = parseTaskRef(ref);
   const task = parsed && await findTask(env, parsed);
-  if (!task) await reply(env, chat, parsed ? 'Task not found (or the id prefix matches more than one task).' : `Use: ${usage}`);
+  if (!task) await reply(env, chat, parsed ? T.taskNotFound(env) : T.taskRefUsage(env, usage));
   return task;
 }
 
@@ -233,17 +233,16 @@ export async function handleMessage(env, m) {
     }
     case 'remember': {
       const parsed = parseMemory(text);
-      if (!parsed) return reply(env, chat, 'Use: /remember video.language=Khmer');
-      if (looksSecret(parsed.key, parsed.value)) return reply(env, chat, 'Not saved: this looks like a password, key or token. Saved settings are sent to the AI provider with every plan, so never store credentials here.');
+      if (!parsed) return reply(env, chat, T.rememberUsage(env));
+      if (looksSecret(parsed.key, parsed.value)) return reply(env, chat, T.notSecret(env));
       await env.DB.prepare(`INSERT INTO memories (key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP)
         ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP`).bind(parsed.key, parsed.value).run();
       await audit(env, null, 'MEMORY_UPDATED', user, parsed.key);
-      return reply(env, chat, `Saved: ${parsed.key} = ${parsed.value}
-(Saved settings are included in AI prompts; on the free Gemini tier Google may use them to improve its products.)`);
+      return reply(env, chat, T.saved(env, parsed.key, parsed.value));
     }
     case 'memory': {
       const rows = await env.DB.prepare('SELECT key,value FROM memories ORDER BY updated_at DESC LIMIT 30').all();
-      return reply(env, chat, rows.results?.length ? rows.results.map(x => `${x.key} = ${x.value}`).join('\n') : 'No memory saved.');
+      return reply(env, chat, rows.results?.length ? rows.results.map(x => `${x.key} = ${x.value}`).join('\n') : T.noMemory(env));
     }
     case 'forget': {
       const key = c.args.trim();
@@ -256,10 +255,10 @@ export async function handleMessage(env, m) {
     case 'status': { // one list: tasks waiting for you first (⏳), then the most recent
       const rows = await env.DB.prepare(`SELECT id,status,task_type,created_at FROM tasks
         ORDER BY (status='awaiting_approval') DESC, created_at DESC LIMIT 10`).all();
-      return reply(env, chat, rows.results?.length ? rows.results.map(x => `${x.status === 'awaiting_approval' ? '⏳ ' : ''}${short(x.id)} | ${x.status} | ${x.task_type} | ${x.created_at}`).join('\n') : 'No tasks yet.');
+      return reply(env, chat, rows.results?.length ? rows.results.map(x => `${x.status === 'awaiting_approval' ? '⏳ ' : ''}${short(x.id)} | ${x.status} | ${x.task_type} | ${x.created_at}`).join('\n') : T.noTasks(env));
     }
     case 'task': {
-      if (!c.args) return reply(env, chat, 'Use: /task Make a short promotional video for an authorized sample book');
+      if (!c.args) return reply(env, chat, T.taskUsage(env));
       const r = await createTask(env, { userId: user, description: c.args });
       if (r.rateLimited) return reply(env, chat, T.rateLimited(env, r.limit, r.period));
       if (r.failed) return;
@@ -279,19 +278,19 @@ export async function handleMessage(env, m) {
       const task = await resolveTask(env, chat, c.args, '/resume <task-id>');
       if (!task) return;
       const r = await resumeTask(env, task.id, user);
-      if (r.ok) return taskReply(env, chat, task.id, `Resumed ${task.id}. If the quota is still used up it will pause again; nothing switches to paid AI.`);
-      return reply(env, chat, r.reason === 'not_found' ? 'Task not found.' : `Cannot resume: task is ${r.reason.replace('status ', '')}.`);
+      if (r.ok) return taskReply(env, chat, task.id, T.resumed(env, task.id));
+      return reply(env, chat, r.reason === 'not_found' ? T.notFound(env) : T.cannotResume(env, r.reason.replace('status ', '')));
     }
     case 'develop': {
-      if (!c.args) return reply(env, chat, 'Use: /develop Change the homepage heading to "Welcome to BookShareKH"');
-      if (!env.WEBSITE_REPO) return reply(env, chat, 'The website repository is not connected yet (WEBSITE_REPO is not set). See README section K.');
+      if (!c.args) return reply(env, chat, T.developUsage(env));
+      if (!env.WEBSITE_REPO) return reply(env, chat, T.repoMissing(env));
       const r = await createTask(env, { userId: user, description: c.args, type: 'website_code_change' });
       if (r.rateLimited) return reply(env, chat, T.rateLimited(env, r.limit, r.period));
       if (r.failed) return;
       return taskReply(env, chat, r.id, T.developReceived(env, r.id));
     }
     case 'deploy': {
-      if (!env.WEBSITE_REPO) return reply(env, chat, 'The website repository is not connected yet (WEBSITE_REPO is not set).');
+      if (!env.WEBSITE_REPO) return reply(env, chat, T.repoMissing(env));
       const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(env.WEBSITE_REPO)}/commits/main`,
         { headers: githubHeaders(env), signal: AbortSignal.timeout(15000) });
       const head = r.ok ? await r.json() : null;
@@ -316,7 +315,7 @@ export async function handleMessage(env, m) {
       try {
         if (sub === 'search') {
           const q = rest.join(' ');
-          if (!q) return reply(env, chat, 'Use: /books search <title>');
+          if (!q) return reply(env, chat, T.booksUsage(env));
           return reply(env, chat, formatBooks(await searchBooks(env, q), T.searchHeading(env, clamp(q, 60)), T.noBooks(env)));
         }
         const n = Number(rest[0] || (sub && sub !== 'latest' ? sub : 5)) || 5;
@@ -380,7 +379,7 @@ export async function handleMessage(env, m) {
       }
     }
     case 'research': {
-      if (!c.args) return reply(env, chat, 'Use: /research Pride and Prejudice');
+      if (!c.args) return reply(env, chat, T.researchUsage(env));
       let found;
       try { found = await searchPublicDomain(c.args, { languages: env.BOOK_LANGUAGES }); }
       catch (e) { if (e instanceof SourceDownError) return reply(env, chat, T.sourceDown(env)); throw e; }
@@ -399,17 +398,19 @@ export async function handleMessage(env, m) {
     case 'ops': { // Website Operations: menu, run now, schedule
       const { sendOpsMenu, SECTIONS } = await import('./ops/telegram.js');
       const { getSchedule, parseSchedule, scheduleLabel, setSetting } = await import('./ops/run.js');
+      const { opsText } = await import('./ops/i18n.js');
+      const L = opsText(env);
       const [sub, ...rest] = c.args.trim().split(/\s+/).filter(Boolean);
       if (sub === 'run' || sub === 'inspect') {
         await env.TASK_QUEUE?.send({ v: 1, type: 'ops_run', trigger: 'manual' });
-        return reply(env, chat, 'Inspection started.');
+        return reply(env, chat, L.started);
       }
       if (sub === 'schedule' || sub === 'on' || sub === 'off') {
         const next = parseSchedule(sub === 'schedule' ? rest.join(' ') : sub, await getSchedule(env));
-        if (!next) return reply(env, chat, 'Use: /admin ops schedule fri 08:00  (or on / off)');
+        if (!next) return reply(env, chat, L.scheduleUsage);
         await setSetting(env, 'ops_schedule', JSON.stringify(next));
         await audit(env, null, 'OPS_SCHEDULE', user, scheduleLabel(next));
-        return reply(env, chat, `Weekly inspection: ${scheduleLabel(next)}`);
+        return reply(env, chat, `${L.weeklyInspection}: ${scheduleLabel(next, env)}`);
       }
       const key = Object.entries(SECTIONS).find(([, s]) => s.label.toLowerCase().startsWith(String(sub || '').toLowerCase()))?.[0];
       return sendOpsMenu(env, chat, sub && key ? key : 'ov');

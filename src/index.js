@@ -11,6 +11,7 @@ import { TtsError, geminiSpeech } from './ai/gemini-tts.js';
 import { advance, autoResume } from './orchestration/engine.js';
 import { deployShaOf, prReviewText } from './orchestration/github.js';
 import { handleCallback, handleMessage } from './commands.js';
+import { registerMenu } from './departments.js';
 import { handleQueueBatch } from './orchestration/queue-consumer.js';
 import { pollBookRequests } from './books/requests.js';
 import { pollTopups } from './website/topups.js';
@@ -248,6 +249,8 @@ export default {
   },
   // Cron trigger (wrangler.jsonc): announce new booksharekh.com book requests in Telegram.
   async scheduled(event, env) {
+    // Telegram "/" menu: replaced automatically after an update (only when its version changed; one D1 read otherwise).
+    try { await registerMenu(env); } catch (e) { console.error('menu update failed', String(e)); }
     try { await autoResume(env); } catch (e) { console.error('auto-resume failed', String(e)); }
     try { await pollTopups(env); } catch (e) { console.error('top-up poll failed', String(e)); }
     try { await pollUsers(env); } catch (e) { console.error('user activity poll failed', String(e)); }

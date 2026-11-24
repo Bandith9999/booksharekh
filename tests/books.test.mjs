@@ -109,19 +109,19 @@ test('only gutenberg.org downloads, only public-domain titles, no double import'
   await assert.rejects(downloadFile('https://gutenberg.org.evil.example/x.epub'), /non-Gutenberg/);
   const env = apiEnv(); const { calls } = setup();
   await telegram(env, press('bi:9:0'));
-  assert.match(lastText(calls), /not marked public domain/);
+  assert.match(lastText(calls), /Not public domain/);
   await telegram(env, press('bi:10:0'));
-  assert.match(lastText(calls), /not marked public domain with an EPUB/);
+  assert.match(lastText(calls), /Not public domain with an EPUB/);
   assert.equal(latestTask(env), undefined);
   await telegram(env, press('bi:2701:0'));
   await telegram(env, press('bi:2701:0'));
-  assert.match(lastText(calls), /already being imported/);
+  assert.match(lastText(calls), /Already importing this book/);
 });
 
 test('imports need the website API', async () => {
   const env = makeEnv(); const { calls } = setup();
   await telegram(env, press('bi:2701:0'));
-  assert.match(lastText(calls), /website API is not connected yet/);
+  assert.match(lastText(calls), /Website API not connected/);
   assert.equal(latestTask(env), undefined);
 });
 

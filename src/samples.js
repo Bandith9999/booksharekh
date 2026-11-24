@@ -33,6 +33,6 @@ export function sampleAlerts(env) {
 
 export async function sendSamples(env, chat) {
   const list = sampleAlerts(env);
-  await reply(env, chat, `🧪 Preview: ${list.length} sample alerts (made-up data, buttons do nothing)\n\n${list.map(([name], i) => `${i + 1}. ${name}`).join('\n')}`);
+  await reply(env, chat, T.previewHead(env, list.length, list.map(([name], i) => `${i + 1}. ${name}`).join('\n')));
   for (const [, text, keyboard] of list) await reply(env, chat, text, keyboard ? { reply_markup: keyboard } : {});
 }
