@@ -62,7 +62,7 @@ test('/research offers only public-domain titles that have an EPUB', async () =>
 test('Prepare draft → private draft with EPUB and cover → Publish approval bound to file hashes → published', async () => {
   const env = apiEnv(); const { state, calls } = setup();
   await telegram(env, press('bi:2701:0'));
-  assert.match(lastText(calls), /Preparing a private draft of "Moby Dick; Or, The Whale"/);
+  assert.match(lastText(calls), /Preparing draft · "Moby Dick; Or, The Whale"/);
   const task = latestTask(env);
   assert.equal(task.task_type, 'book_import');
   await drain(env);
@@ -76,7 +76,7 @@ test('Prepare draft → private draft with EPUB and cover → Publish approval b
   assert.deepEqual(Object.keys(state.files).sort(), ['cover', 'epub']);
   assert.equal(latestTask(env).status, 'awaiting_approval');
   const preview = sent(calls).at(-1).text;
-  assert.match(preview, /Draft ready on booksharekh\.com \(private[\s\S]*Rights: public domain \(Project Gutenberg #2701\)[\s\S]*Proposed action: Publish this book on booksharekh\.com/);
+  assert.match(preview, /Draft ready \(private\)[\s\S]*Public domain · Gutenberg #2701[\s\S]*👉 Publish this book on booksharekh\.com/);
   assert.equal(state.publish, undefined, 'nothing published before approval');
 
   await telegram(env, press(approveButton(calls)));
@@ -84,7 +84,7 @@ test('Prepare draft → private draft with EPUB and cover → Publish approval b
   assert.deepEqual(state.publish.approved_files, { cover: state.files.cover, epub: state.files.epub });
   assert.match(state.publish.approval_id, /^APR-/);
   assert.equal(latestTask(env).status, 'completed');
-  assert.match(sent(calls).map(m => m.text).join('\n'), /✅ Published "Moby Dick; Or, The Whale" by Herman Melville on booksharekh\.com \(book #77/);
+  assert.match(sent(calls).map(m => m.text).join('\n'), /✅ Published · "Moby Dick; Or, The Whale"\n📖 Book #77/);
   assert.deepEqual(steps(env, task.id).map(s => `${s.action}:${s.status}`), ['prepare_draft:completed', 'publish_book:completed']);
   assert.ok(auditEvents(env, task.id).includes('APPROVE'));
 });
@@ -129,7 +129,7 @@ test('book requests: silent first poll, then alerts; Find → legal search → i
   const env = apiEnv();
   const { state, calls } = setup({ files: {}, requests: [{ id: 4, book_title: 'Old request', status: 'pending' }] });
   await worker.scheduled({}, env, {});
-  assert.match(lastText(calls), /Watching booksharekh\.com book requests from #4/);
+  assert.match(lastText(calls), /Watching book requests \(from #4\)/);
   assert.doesNotMatch(sent(calls).map(m => m.text).join('\n'), /Old request/, 'no flood of old requests');
 
   state.requests.push({ id: 5, book_title: 'Moby Dick', author: 'Herman Melville', language: 'English', status: 'pending' });
@@ -149,7 +149,7 @@ test('book requests: silent first poll, then alerts; Find → legal search → i
   await drain(env);
   assert.equal(state.requests[1].status, 'done');
   assert.match(state.requests[1].note, /book #77/);
-  assert.match(sent(calls).map(m => m.text).join('\n'), /Book request #5 marked done/);
+  assert.match(sent(calls).map(m => m.text).join('\n'), /Request #5 done/);
 });
 
 test('/requests lists pending requests made before the watcher started, with buttons', async () => {
@@ -168,10 +168,10 @@ test('a request with no legal copy says so; reject marks it rejected', async () 
   const state = { files: {}, requests: [{ id: 6, book_title: 'A 2024 Bestseller', status: 'pending' }] };
   const c2 = mockFetch([routes.telegram, [/gutendex/, () => Response.json({ results: [] })], site(state)]);
   await telegram(env, press('rq:6'));
-  assert.match(lastText(c2), /No public-domain copy of "A 2024 Bestseller"[\s\S]*licensed copy/);
+  assert.match(lastText(c2), /"A 2024 Bestseller": no public-domain copy/);
   await telegram(env, press('rr:6'));
   assert.equal(state.requests[0].status, 'rejected');
-  assert.match(lastText(c2), /Book request #6 rejected/);
+  assert.match(lastText(c2), /Request #6 rejected/);
   assert.equal(latestTask(env), undefined, 'nothing imported');
 });
 
@@ -187,9 +187,9 @@ test('a book-source outage gives a short notice instead of a raw timeout error',
   const env = apiEnv({ BOT_LANGUAGE: 'km' });
   const calls = mockFetch([routes.telegram, [/gutendex/, () => { throw new DOMException('The operation was aborted due to timeout', 'TimeoutError'); }]]);
   await telegram(env, msg('/research pride and prejudice'));
-  assert.equal(lastText(calls), '🔧 ប្រភពសៀវភៅ (Project Gutenberg) មិនដំណើរការបណ្ដោះអាសន្ន។ សូមសាកម្តងទៀតពេលក្រោយ។');
+  assert.equal(lastText(calls), '🔧 Project Gutenberg មិនដំណើរការ — សូមសាកពេលក្រោយ');
   const c2 = mockFetch([routes.telegram, [/gutendex/, () => new Response('Temporarily Down for Maintenance', { status: 503 })]]);
   await telegram(env, press('bi:2701:0'));
-  assert.match(lastText(c2), /🔧 ប្រភពសៀវភៅ/);
+  assert.match(lastText(c2), /🔧 Project Gutenberg/);
   assert.doesNotMatch(sent(c2).map(m => m.text).join('\n'), /aborted|មិនអាចដំណើរការសារ/, 'no raw error');
 });

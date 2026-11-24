@@ -81,7 +81,7 @@ test('Reject, already-decided and changed top-ups are reported, never credited',
   const calls = mockFetch([[/api\.telegram\.org/, () => Response.json({ ok: true, result: {} })], s.route, s.requests]);
   await worker.scheduled({}, e, {});
   await telegram(e, press('tr:6'));
-  assert.equal(lastText(calls), '❌ Top-up #6 បានបដិសេធ');
+  assert.equal(lastText(calls), '❌ Top-up #6 10.00 USD · dara បានបដិសេធ');
   rows[1].status = 'approved'; // approved in the admin panel meanwhile
   await telegram(e, press('ta:7'));
   assert.equal(lastText(calls), '⚠️ Top-up #7: This top-up has already been approved.');
@@ -104,7 +104,7 @@ test('only the owner can decide; /topups re-sends pending alerts', async () => {
   assert.equal(photos(calls).length, 2);
   rows[0].status = 'rejected';
   await telegram(e, msg('/topups'));
-  assert.equal(lastText(calls), 'គ្មាន topup រង់ចាំ');
+  assert.equal(lastText(calls), '📭 គ្មាន topup រង់ចាំ');
   assert.ok(sent(calls).length >= 1);
 });
 

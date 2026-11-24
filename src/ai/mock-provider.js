@@ -21,6 +21,7 @@ function managerPlan({ taskType, request }) {
 function promoScripts({ theme = '' }) {
   return {
     title: 'BookShareKH [DEMO]', background: 'dist/img/library-bg.jpg',
+    design: { font: 'kdamthmor', body_font: 'battambang', palette: 'ocean' }, voice_style: 'warm, upbeat young Cambodian woman, medium pace',
     scenes: [
       { text: 'ចង់អានសៀវភៅល្អៗ?', voice: 'ចង់អានសៀវភៅល្អៗមែនទេ?' },
       { text: 'តម្លៃត្រឹមតែ $0.50', voice: 'តម្លៃត្រឹមតែហាសិបសេនក្នុងមួយក្បាល' },
@@ -32,7 +33,8 @@ function promoScripts({ theme = '' }) {
 
 // Content Creator poster text (demo).
 const posterText = ({ candidate_ids = [] } = {}) => ({ cover_ids: candidate_ids.slice(0, 5),
-  title: 'Poster [DEMO]', background: 'dist/img/library-bg.jpg', headline: 'អានសៀវភៅល្អៗ គ្រប់ពេល', subline: 'សៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ',
+  title: 'Poster [DEMO]', design: { layout: 'fan', palette: 'brand_night', font: 'koulen', body_font: 'kantumruy', decor: 'glow' }, background: 'dist/img/library-bg.jpg',
+  kicker: '', headline: 'អានសៀវភៅល្អៗ គ្រប់ពេល', highlight: 'សៀវភៅល្អៗ', subline: 'សៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ', book_notes: [],
   points: ['តម្លៃ $0.50', 'បញ្ចូលលុយតាម KHQR'], cta: 'ចូលមើលឥឡូវនេះ',
   caption: '[DEMO] អានសៀវភៅលើ BookShareKH\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#សៀវភៅ', '#Reading'],
 });

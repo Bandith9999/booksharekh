@@ -3,7 +3,7 @@
 // that amount and transaction ID back; the site credits only if the record still matches and is pending.
 import { clamp } from '../helpers.js';
 import { audit } from '../db.js';
-import { notifyOwner, tg, tgForm } from '../telegram.js';
+import { notifyOwner, removeMessage, tg, tgForm } from '../telegram.js';
 import { T } from '../i18n.js';
 import { WebsiteApiError, apiConfigured, approveTopup, listTopups, rejectTopup, topupImage } from './laravel-api.js';
 
@@ -99,7 +99,7 @@ export async function decideTopup(env, id, approve, userId, message) {
     } else {
       await rejectTopup(env, id, { ...body, note: 'Rejected by the owner in Telegram' });
       await audit(env, null, 'TOPUP_REJECTED', userId, `#${id} ${t.amount} ${t.currency}`);
-      text = T.topupRejected(env, id);
+      text = T.topupRejected(env, t);
     }
   } catch (e) {
     if (!(e instanceof WebsiteApiError)) throw e;
@@ -108,7 +108,8 @@ export async function decideTopup(env, id, approve, userId, message) {
     return T.topupProblem(env, id, e.message.replace(/^Website refused: /, ''));
   }
   await delSetting(env, shownKey(id));
-  await clearButtons(env, message);
+  // Decided: the alert disappears; the result message (amount, user) is what stays in the chat.
+  await removeMessage(env, message);
   return text;
 }
 

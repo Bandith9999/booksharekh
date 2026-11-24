@@ -24,16 +24,16 @@ test('/website reports live health and flags debug mode without printing sensiti
   const calls = mockFetch([routes.telegram, site({ debug: true, envPublic: true })]);
   await telegram(env, msg('/website'));
   const t = lastText(calls);
-  assert.match(t, /✅ Homepage HTTP 200 in \d+ ms \(PHP\/8\.4\.28\)/);
-  assert.match(t, /🚨 Debug mode is ON in production/);
-  assert.match(t, /🚨 \/\.env is publicly readable/);
+  assert.match(t, /✅ Homepage HTTP 200 · \d+ ms · PHP\/8\.4\.28/);
+  assert.match(t, /🚨 Debug mode ON in production/);
+  assert.match(t, /🚨 \/\.env is public!/);
   assert.doesNotMatch(t, /supersecret/, 'never echoes the body of a sensitive path');
-  assert.match(t, /Laravel API not connected yet/);
+  assert.match(t, /API not connected/);
 
   const env2 = makeEnv();
   const c2 = mockFetch([routes.telegram, site()]);
   await telegram(env2, msg('/website status'));
-  assert.match(lastText(c2), /✅ Debug endpoint not exposed[\s\S]*✅ \/\.env, \/\.git\/HEAD/);
+  assert.match(lastText(c2), /✅ Debug off[\s\S]*✅ \/\.env, \/\.git\/HEAD/);
 });
 
 test('/books reads through the restricted Laravel API, and explains when it is not connected', async () => {
@@ -55,7 +55,7 @@ test('/books reads through the restricted Laravel API, and explains when it is n
   assert.equal(new URL(req.url).searchParams.get('latest'), '3');
   assert.equal(req.init.headers.Authorization, 'Bearer LARAVEL-SECRET');
   await telegram(env, msg('/books search Dune'));
-  assert.match(lastText(calls), /Books matching "Dune":\n\(no books found\)/);
+  assert.match(lastText(calls), /🔎 "Dune":\n\(no books found\)/);
 
   const bad = makeEnv({ LARAVEL_API_URL: 'https://booksharekh.com', LARAVEL_API_TOKEN: 'x' });
   const c3 = mockFetch([routes.telegram, [API, () => Response.json({ error: 'invalid or revoked token' }, { status: 401 })]]);
@@ -120,7 +120,7 @@ test('/develop: approved merge merges exactly the reviewed commit, then asks to 
   const { env, calls, task, state } = await developToMergeApproval();
   assert.equal(latestTask(env).status, 'awaiting_approval', 'waits for the owner after the PR is opened');
   const review = sent(calls).at(-1);
-  assert.match(review.text, /🔍 Pull request #3 is ready[\s\S]*resources\/views\/frontend\/home\.blade\.php \(\+1 −1\)[\s\S]*- Most Viewed Books\n\+ Most Viewed Book[\s\S]*Proposed action: Merge this pull request/);
+  assert.match(review.text, /🔍 PR #3 ready[\s\S]*resources\/views\/frontend\/home\.blade\.php \(\+1 −1\)[\s\S]*- Most Viewed Books\n\+ Most Viewed Book[\s\S]*👉 Merge this pull request/);
   assert.match(review.reply_markup.inline_keyboard[0][0].callback_data, /^ap:APR-/);
   const mergeAp = approvals(env, task.id).find(a => a.action_type === 'merge_pull_request');
   assert.equal(JSON.parse(mergeAp.payload).head_sha, 'a'.repeat(40));
@@ -130,7 +130,7 @@ test('/develop: approved merge merges exactly the reviewed commit, then asks to 
   assert.deepEqual([state.merge.sha, state.merge.merge_method], ['a'.repeat(40), 'squash'], 'merges only the approved commit');
   assert.equal(latestTask(env).status, 'awaiting_approval', 'next: the deploy approval');
   const deployMsg = sent(calls).at(-1);
-  assert.match(deployMsg.text, /✅ Merged pull request #3 into main \(commit cccccccccccc\)[\s\S]*🚀 Ready to deploy commit cccccccccccc[\s\S]*• resources\/views\/frontend\/home\.blade\.php[\s\S]*Proposed action: Deploy this commit to booksharekh\.com/);
+  assert.match(deployMsg.text, /✅ Merged PR #3 · cccccccccccc[\s\S]*🚀 Deploy · cccccccccccc[\s\S]*• resources\/views\/frontend\/home\.blade\.php[\s\S]*👉 Deploy this commit to booksharekh\.com/);
   assert.doesNotMatch(deployMsg.text, /tests\/Feature/, 'only files that go to the server are listed');
   assert.match(state.compare, /compare\/d56611b\.\.\.c{40}$/, 'first deploy compares from the cPanel import');
   assert.equal(state.deploys, undefined, 'nothing deployed before approval');
@@ -144,7 +144,7 @@ test('/develop: approved merge merges exactly the reviewed commit, then asks to 
     run_url: 'https://github.com/owner/booksharekh-website/actions/runs/11', deployed_sha: 'c'.repeat(40) });
   assert.equal(done.status, 200);
   assert.equal(latestTask(env).status, 'completed');
-  assert.match(lastText(calls), /✅ Deployed to booksharekh\.com\.\nDeployed 1 file/);
+  assert.match(lastText(calls), /✅ Deployed to booksharekh\.com\nDeployed 1 file/);
   assert.equal(env.DB.db.prepare("SELECT value FROM settings WHERE key='last_deployed_sha'").get().value, 'c'.repeat(40));
 });
 
@@ -156,7 +156,7 @@ test('/deploy: approval bound to the current main commit; a changed commit is re
   await telegram(env, msg('/deploy'));
   const task = latestTask(env);
   assert.equal(task.task_type, 'website_deploy');
-  assert.match(lastText(calls), /main: translate New Releases into Khmer \(#8\)\n\n🚀 Ready to deploy commit dddddddddddd/);
+  assert.match(lastText(calls), /main: translate New Releases into Khmer \(#8\)\n\n🚀 Deploy · dddddddddddd/);
   assert.match(state.compare, /compare\/b{40}\.\.\.d{40}$/, 'compares from the last deployed commit');
 
   // Tampering with the commit after approval must not deploy it.
@@ -174,7 +174,7 @@ test('/deploy: approval bound to the current main commit; a changed commit is re
   await drain(env2);
   const t2 = latestTask(env2);
   await job(env2, 'POST', '/job-result', { task_id: t2.id, status: 'failed', note: 'Site check failed (HTTP 500) after deploy; the previous files were restored automatically.' });
-  assert.match(lastText(c2), /❌ Deploy failed\.\nSite check failed \(HTTP 500\)[\s\S]*restored automatically/);
+  assert.match(lastText(c2), /❌ Deploy failed\nSite check failed \(HTTP 500\)[\s\S]*restored automatically/);
   assert.equal(env2.DB.db.prepare("SELECT value FROM settings WHERE key='last_deployed_sha'").get(), undefined, 'a failed deploy is not recorded');
 });
 
@@ -183,7 +183,7 @@ test('/develop: Reject closes the pull request; a PR changed after approval is n
   const reject = sent(a.calls).at(-1).reply_markup.inline_keyboard[0][1].callback_data;
   await telegram(a.env, press(reject));
   assert.deepEqual(a.state.closed, { state: 'closed' });
-  assert.match(lastText(a.calls), /Rejected .* The pull request was closed\./);
+  assert.match(lastText(a.calls), /Rejected · PR closed/);
   assert.equal(a.state.merge, undefined);
 
   const b = await developToMergeApproval({ mergeStatus: 409 });
@@ -210,7 +210,7 @@ test('/develop: plan → approval bound to the website repo → Laravel Develope
   const env = makeEnv({ WEBSITE_REPO: 'booksharekh-website' });
   const calls = mockFetch([routes.telegram, githubSite()]);
   await telegram(env, msg('/develop Change the homepage heading to "Welcome to BookShareKH"'));
-  assert.match(lastText(calls), /Website task BSK-.* received/);
+  assert.match(lastText(calls), /Website change received/);
   await drain(env);
   const task = latestTask(env);
   assert.equal(task.task_type, 'website_code_change');
@@ -219,7 +219,7 @@ test('/develop: plan → approval bound to the website repo → Laravel Develope
   const ap = approvals(env, task.id)[0];
   assert.equal(ap.action_type, 'dispatch_code_change');
   assert.deepEqual([JSON.parse(ap.payload).repo, JSON.parse(ap.payload).workflow], ['owner/booksharekh-website', 'laravel-developer.yml']);
-  assert.match(lastText(calls), /Proposed action: Run the Laravel Developer[\s\S]*Nothing is deployed/);
+  assert.match(lastText(calls), /👉 Run the Laravel Developer[\s\S]*Nothing is deployed/);
 
   await telegram(env, press(approveButton(calls)));
   await drain(env);
@@ -227,7 +227,7 @@ test('/develop: plan → approval bound to the website repo → Laravel Develope
   assert.equal(dispatch.length, 1);
   assert.deepEqual(dispatch[0].body, { ref: 'main', inputs: { task_id: task.id } });
   assert.equal(latestTask(env).status, 'running');
-  assert.match(lastText(calls), /Approved .* Running now/, 'one message after approval, no separate "started" message');
+  assert.match(lastText(calls), /Approved · running/, 'one message after approval, no separate "started" message');
 
   const got = await (await job(env, 'GET', `/job/${task.id}`)).json();
   assert.equal(got.task_type, 'website_code_change');
@@ -240,7 +240,7 @@ test('/develop: plan → approval bound to the website repo → Laravel Develope
     run_url: 'https://github.com/owner/booksharekh-website/actions/runs/9', pr_url: 'https://github.com/owner/booksharekh-website/pull/3', head_sha: sha });
   assert.equal(done.status, 200);
   assert.equal(latestTask(env).status, 'awaiting_approval', 'next: the owner approves the merge');
-  assert.match(lastText(calls), /Pull request #3 is ready: https:\/\/github\.com\/owner\/booksharekh-website\/pull\/3\nCommit aaaaaaaaaaaa/);
+  assert.match(lastText(calls), /PR #3 ready\n🔗 https:\/\/github\.com\/owner\/booksharekh-website\/pull\/3\nCommit aaaaaaaaaaaa/);
   const pr = env.DB.db.prepare("SELECT uri, content FROM task_artifacts WHERE task_id=? AND kind='pull_request'").get(task.id);
   assert.deepEqual(JSON.parse(pr.content), { pr_url: 'https://github.com/owner/booksharekh-website/pull/3', head_sha: sha });
 });

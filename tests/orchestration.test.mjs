@@ -80,7 +80,7 @@ test('retries stop at max_attempts and the task fails', async () => {
   assert.equal(task.status, 'plan_failed');
   assert.equal(anthropicCalls(calls), AGENTS.manager.maxAttempts);
   assert.deepEqual(env.__queue.retries.map(r => r.delay), [10, 20], 'bounded exponential backoff');
-  assert.match(lastText(calls), /AI planning failed/);
+  assert.match(lastText(calls), /Planning failed/);
 });
 
 test('dead-letter queue marks the task failed and tells the owner', async () => {
@@ -115,7 +115,7 @@ test('cancellation revokes the approval and nothing runs afterwards', async () =
   assert.equal(approvals(env, task.id)[0].status, 'revoked');
   await telegram(env, press(approve));
   await drain(env);
-  assert.match(lastText(calls), /already been handled/);
+  assert.match(lastText(calls), /Already handled/);
   assert.equal(dispatches(calls).length, 0);
 
   // Cancel while the plan is still queued: the model is never called.
@@ -135,7 +135,7 @@ test('a task already running on GitHub cannot be cancelled', async () => {
   await telegram(env, press(approve));
   await drain(env);
   await telegram(env, msg(`/cancel ${task.id}`));
-  assert.match(lastText(calls), /already running on GitHub Actions/);
+  assert.match(lastText(calls), /is running on GitHub/);
   assert.equal(latestTask(env).status, 'running');
 });
 
@@ -214,7 +214,7 @@ test('one way to decide (buttons) and one task list (/status, waiting first)', a
   const { task } = await planTask(env, calls);
   for (const cmd of [`/approve ${task.id}`, `/reject ${task.id}`, '/pending', `/report ${task.id}`]) {
     await telegram(env, msg(cmd));
-    assert.equal(lastText(calls), 'Unknown command. Try /help.', cmd);
+    assert.equal(lastText(calls), '❓ Unknown command · /help', cmd);
   }
   await telegram(env, press(`approve:${task.id}`)); // old Phase 1 button
   assert.equal(latestTask(env).status, 'awaiting_approval', 'old buttons do nothing');
@@ -235,7 +235,7 @@ test('provider fallback: off by default, availability errors only when enabled',
   const c2 = mockFetch([routes.telegram, anthropicStatus(529), routes.openaiPlan()]);
   const { task } = await planTask(on, c2, '/task write a report');
   assert.equal(task.status, 'awaiting_approval');
-  assert.match(sent(c2).at(-1).text, /Plan by openai\/gpt-5-mini/);
+  assert.match(sent(c2).at(-1).text, /📋 Plan · openai\/gpt-5-mini/);
   assert.ok(auditEvents(on, task.id).includes('PROVIDER_FALLBACK'));
 
   const refusal = anthropicEnv({ OPENAI_API_KEY: 'sk-x', AI_FALLBACK_ENABLED: 'true', AI_FALLBACK_PROVIDER: 'openai', AI_FALLBACK_MODEL: 'gpt-5-mini' });
@@ -272,7 +272,7 @@ test('task creation is rate limited per owner', async () => {
   const env = makeEnv({ TASK_RATE_LIMIT_PER_HOUR: '2' });
   const calls = mockFetch([routes.telegram]);
   for (let i = 0; i < 3; i++) await telegram(env, msg(`/task report ${i}`));
-  assert.match(lastText(calls), /Limit reached: at most 2 tasks per hour/);
+  assert.match(lastText(calls), /Limit: 2 tasks per hour/);
   assert.equal(env.DB.db.prepare('SELECT COUNT(*) n FROM tasks').get().n, 2);
 });
 

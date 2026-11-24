@@ -58,7 +58,7 @@ test('logins alone send no alert; many new members are capped to 10 lines', asyn
   assert.ok(!sent(calls).some(m => /Login|🔑/.test(m.text)));
   s.state.activity = { registered: Array.from({ length: 13 }, (_, i) => ({ user: `u${i}` })), logins: [{ user: 'niza' }] };
   await worker.scheduled({}, e, {});
-  assert.equal(lastText(calls), `👥 HR · *** NEW MEMBER ***\n${Array.from({ length: 10 }, (_, i) => `🆕 u${i}`).join('\n')}\n+3\n\n👥 Total users: 1,200`);
+  assert.equal(lastText(calls), `👥 HR · *** NEW MEMBER ***\n${Array.from({ length: 10 }, (_, i) => `🆕 u${i}`).join('\n')}\n+3\n\n👥 Total: 1,200`);
 });
 
 test('/users shows the total and the last 24 hours', async () => {

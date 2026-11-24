@@ -39,7 +39,7 @@ test('full flow: task → approve once → GitHub job → callback → Telegram 
   await telegram(env, press(approve)); // second press
   await drain(env);
   assert.equal(dispatches(calls).length, 1, 'no duplicate dispatch');
-  assert.match(lastText(calls), /already been handled/);
+  assert.match(lastText(calls), /Already handled/);
 
   const got = await job(env, 'GET', `/job/${task.id}`);
   assert.equal(got.status, 200);
@@ -51,7 +51,7 @@ test('full flow: task → approve once → GitHub job → callback → Telegram 
   assert.deepEqual(steps(env, task.id).map(s => s.status), ['completed', 'completed']);
   assert.equal(env.DB.db.prepare('SELECT status FROM workflow_runs WHERE task_id=?').get(task.id).status, 'completed');
   assert.equal(env.DB.db.prepare("SELECT uri FROM task_artifacts WHERE task_id=? AND kind='github_run'").get(task.id).uri, 'https://github.com/owner/repo/actions/runs/42');
-  assert.match(lastText(calls), /completed[\s\S]*actions\/runs\/42/);
+  assert.match(lastText(calls), /✅ Done[\s\S]*actions\/runs\/42/);
 
   const again = await job(env, 'POST', '/job-result', { task_id: task.id, status: 'failed', note: 'late' });
   assert.equal(again.status, 409, 'finished task cannot be changed');
@@ -118,7 +118,7 @@ test('Claude request shape and text extraction', async () => {
   assert.equal(req.body.fallbacks, undefined, 'refusal fallback is opt-in');
   assert.match(req.body.messages[0].content, /<owner_request>\nwrite a report\n<\/owner_request>/);
   assert.equal(task.status, 'awaiting_approval');
-  assert.match(sent(calls).at(-1).text, /Plan by anthropic\/claude-sonnet-5-5[\s\S]*Check rights, then render/);
+  assert.match(sent(calls).at(-1).text, /📋 Plan · anthropic\/claude-sonnet-5-5[\s\S]*Check rights, then render/);
 
   const env2 = anthropicEnv({ ANTHROPIC_REFUSAL_FALLBACK: 'true' });
   const calls2 = mockFetch([routes.telegram, routes.anthropicPlan()]);
@@ -173,7 +173,7 @@ test('processing error notifies owner and returns 200 so Telegram stops retrying
   const calls = mockFetch([[/api\.telegram\.org/, () => (++n === 1 ? new Response('down', { status: 502 }) : Response.json({ ok: true }))]]);
   const res = await telegram(env, msg('/status'));
   assert.equal(res.status, 200);
-  assert.match(lastText(calls), /could not be processed/);
+  assert.match(lastText(calls), /Could not process your message/);
 });
 
 test('job endpoints require the callback secret', async () => {

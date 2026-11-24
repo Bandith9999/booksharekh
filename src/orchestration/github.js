@@ -1,7 +1,7 @@
 // Approved GitHub Actions job execution. Exactly one workflow dispatch per approval.
 import { clamp, githubHint, sha256Hex } from '../helpers.js';
 import { audit, latestArtifact, newId } from '../db.js';
-import { notifyTaskOwner } from '../telegram.js';
+import { notifyTaskResult } from '../telegram.js';
 import { consumeApproval, consumeStepApproval, finishApproval, releaseApproval } from './approvals.js';
 import { transition } from './state-machine.js';
 import { T, isKhmer } from '../i18n.js';
@@ -166,7 +166,7 @@ export async function runGithubMerge(env, task, agentTask) {
       await env.DB.prepare('UPDATE tasks SET proposal=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
         .bind(await deployPreviewText(env, body.sha, T.merged(env, payload.pr_number, String(body.sha).slice(0, 12))), task.id).run();
     } else {
-      await notifyTaskOwner(env, task, T.merged(env, payload.pr_number, String(body.sha).slice(0, 12))).catch(() => {});
+      await notifyTaskResult(env, task, T.merged(env, payload.pr_number, String(body.sha).slice(0, 12))).catch(() => {});
     }
     return { merged_sha: body.sha, pr_number: payload.pr_number };
   } catch (e) {
