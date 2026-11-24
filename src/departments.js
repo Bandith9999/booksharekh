@@ -14,8 +14,8 @@ const k = (env, en, km) => (isKhmer(env) ? km : en);
 // examples: what the owner can type after the department command.
 export const DEPARTMENTS = [
   { key: 'admin', icon: '👑', name: 'Administrator', en: 'Runs the company: tasks, AI team, settings', km: 'គ្រប់គ្រងការងារ ក្រុម AI និង settings',
-    agents: ['manager', 'qa_reviewer'],
-    examples: [['status', 'status'], ['cancel BSK-1a2b', 'cancel BSK-1a2b'], ['remember audience=parents in Phnom Penh', 'remember audience=ឪពុកម្តាយ'], ['plan a reading challenge for June', 'រៀបចំកម្មវិធីអានសៀវភៅខែមិថុនា']],
+    agents: ['manager', 'qa_reviewer', 'website_ops'],
+    examples: [['ops', 'ops'], ['ops run', 'ops run'], ['status', 'status'], ['cancel BSK-1a2b', 'cancel BSK-1a2b'], ['remember audience=parents in Phnom Penh', 'remember audience=ឪពុកម្តាយ'], ['plan a reading challenge for June', 'រៀបចំកម្មវិធីអានសៀវភៅខែមិថុនា']],
     commands: [
       ['status', '', 'Tasks (waiting first)', 'ការងារ (រង់ចាំមុន)', true],
       ['task', '<request>', 'New task for the AI team', 'ការងារថ្មីឲ្យក្រុម AI'],
@@ -28,6 +28,7 @@ export const DEPARTMENTS = [
       ['remember', 'name=text', 'Tell the AI to remember', 'ឲ្យ AI ចាំ'],
       ['forget', '<name>', 'Delete a saved note', 'លុបអ្វីដែល AI ចាំ'],
       ['preview', '', 'Sample of every alert', 'គំរូ alert ទាំងអស់', true],
+      ['ops', '[run | schedule fri 08:00]', 'Website Operations: weekly website check, corrections, analytics', 'Website Operations: ពិនិត្យវេបសាយប្រចាំសប្តាហ៍', true],
     ] },
   { key: 'developer', icon: '💻', name: 'Developer', en: 'Website code: change, check, deploy', km: 'កូដវេបសាយ: កែ ពិនិត្យ deploy',
     agents: ['laravel_developer'],
@@ -115,6 +116,9 @@ export function routeRequest(dept, text) {
       if (/^remember\s+\S/.test(low)) return { cmd: 'remember', args: t.replace(/^remember\s+/i, '') };
       if (/^forget\s+\S+$/.test(low)) return { cmd: 'forget', args: t.replace(/^forget\s+/i, '') };
       if (/^preview\b/.test(low)) return { cmd: 'preview', args: '' };
+      // Website Operations: "/admin ops", "/admin ops run", "/admin inspect the website", "/admin ops schedule fri 08:00"
+      if (/^(inspect|inspection)\b/.test(low)) return { cmd: 'ops', args: 'run' };
+      if (/^(ops|website ops|website operations|operations)\b/.test(low)) return { cmd: 'ops', args: t.replace(/^(ops|website ops|website operations|operations)\s*/i, '') };
       return { cmd: 'task', args: t };
     }
     case 'finance': return { cmd: 'topups', args: '' };

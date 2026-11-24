@@ -46,7 +46,7 @@ test('scheduler runs independent steps in parallel and respects dependencies', (
 
 test('registry: every agent has a prompt, known tools, and approval-gated external actions', () => {
   assert.deepEqual(validateRegistry(), []);
-  assert.equal(Object.keys(AGENTS).length, 7);
+  assert.equal(Object.keys(AGENTS).length, 8, '7 specialists + Website Operations');
   for (const a of Object.values(AGENTS)) {
     assert.ok(a.prompt.system.includes('owner approval'), `${a.name} prompt states approval rules`);
     for (const t of a.allowedTools) assert.ok(TOOLS[t], `${a.name}: ${t}`);

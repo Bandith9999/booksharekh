@@ -396,6 +396,24 @@ export async function handleMessage(env, m) {
       return reply(env, chat, await agentText(env, a));
     }
     case 'diag': return reply(env, chat, await diagnostics(env));
+    case 'ops': { // Website Operations: menu, run now, schedule
+      const { sendOpsMenu, SECTIONS } = await import('./ops/telegram.js');
+      const { getSchedule, parseSchedule, scheduleLabel, setSetting } = await import('./ops/run.js');
+      const [sub, ...rest] = c.args.trim().split(/\s+/).filter(Boolean);
+      if (sub === 'run' || sub === 'inspect') {
+        await env.TASK_QUEUE?.send({ v: 1, type: 'ops_run', trigger: 'manual' });
+        return reply(env, chat, 'Inspection started.');
+      }
+      if (sub === 'schedule' || sub === 'on' || sub === 'off') {
+        const next = parseSchedule(sub === 'schedule' ? rest.join(' ') : sub, await getSchedule(env));
+        if (!next) return reply(env, chat, 'Use: /admin ops schedule fri 08:00  (or on / off)');
+        await setSetting(env, 'ops_schedule', JSON.stringify(next));
+        await audit(env, null, 'OPS_SCHEDULE', user, scheduleLabel(next));
+        return reply(env, chat, `Weekly inspection: ${scheduleLabel(next)}`);
+      }
+      const key = Object.entries(SECTIONS).find(([, s]) => s.label.toLowerCase().startsWith(String(sub || '').toLowerCase()))?.[0];
+      return sendOpsMenu(env, chat, sub && key ? key : 'ov');
+    }
     default: return reply(env, chat, T.unknown(env));
   }
 }
@@ -422,6 +440,10 @@ export async function handleCallback(env, q) {
     return r.ok ? taskReply(env, chat, m[1], cancelText(m[1], r, env), { final: true }) : reply(env, chat, cancelText(m[1], r, env));
   }
   // Department menu buttons: open a department, or run a command that needs no extra text.
+  if (data.startsWith('wo:')) {
+    const { handleOpsCallback } = await import('./ops/telegram.js');
+    return handleOpsCallback(env, q, data, user);
+  }
   if ((m = /^dp:([a-z]+)$/.exec(data))) return m[1] === 'all' ? sendHelp(env, chat) : deptKey(m[1]) && sendDepartment(env, chat, deptKey(m[1]), agentTitles());
   // "Which one did you mean?" buttons after plain words to a department.
   if ((m = /^as:(poster|promo|research):([a-f0-9]{12})$/.exec(data))) {

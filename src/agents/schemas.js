@@ -1,6 +1,6 @@
 // Structured output contracts, shared by every provider. Strict-mode compatible:
 // every object lists all properties in `required` and sets additionalProperties: false.
-export const AGENT_NAMES = ['manager', 'book_researcher', 'book_editor', 'content_creator', 'video_creator', 'laravel_developer', 'qa_reviewer'];
+export const AGENT_NAMES = ['manager', 'book_researcher', 'book_editor', 'content_creator', 'video_creator', 'laravel_developer', 'qa_reviewer', 'website_ops'];
 
 export const PLAN_SCHEMA = {
   type: 'object', additionalProperties: false,

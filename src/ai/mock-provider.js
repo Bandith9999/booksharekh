@@ -39,13 +39,18 @@ const posterText = ({ candidate_ids = [] } = {}) => ({ cover_ids: candidate_ids.
   caption: '[DEMO] អានសៀវភៅលើ BookShareKH\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#សៀវភៅ', '#Reading'],
 });
 
+// Website Operations (demo): every book gets the last listed genre; reviews mentioning "buy now" are spam.
+const opsAnswer = (m = {}) => (m.kind === 'genres'
+  ? { items: (m.ids || []).map(id => ({ id, genre_ids: (m.genre_ids || []).slice(-1), confidence: 'high' })) }
+  : { items: (m.ids || []).map(id => ({ id, label: (m.spam_ids || []).includes(id) ? 'spam' : 'ok' })) });
+
 export const mockProvider = {
   name: 'mock',
   keyName: null,
   modelPattern: /^mock$/,
 
   async generate(env, req) {
-    const responders = { manager: () => managerPlan(req.metadata || {}), video_creator: () => promoScripts(req.metadata || {}), content_creator: () => posterText(req.metadata || {}),
+    const responders = { manager: () => managerPlan(req.metadata || {}), video_creator: () => promoScripts(req.metadata || {}), content_creator: () => posterText(req.metadata || {}), website_ops: () => opsAnswer(req.metadata || {}),
       qa_reviewer: () => ({ agent: 'qa_reviewer', task_id: String(req.metadata?.task_id || ''), result: 'approved', issues: [], human_approval_required: true }) };
     if (!responders[req.agent]) throw new AIError(`mock provider has no responder for agent ${req.agent}`, { kind: 'config', provider: 'mock' });
     const content = JSON.stringify(responders[req.agent]());
