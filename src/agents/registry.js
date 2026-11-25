@@ -22,7 +22,7 @@ export const TOOLS = {
   pdf_inspect: { description: 'Inspect PDF structure with pypdf / PyMuPDF', implemented: false, phase: 5 },
   ffmpeg_render: { description: 'Render vertical video with FFmpeg in GitHub Actions', implemented: false, phase: 5 },
   website_deploy: { description: 'Deploy an approved commit to booksharekh.com over SSH (changed files, backup, health check, rollback)', implemented: true },
-  poster_render: { description: 'Render a 1080x1350 poster in the website style (HTML + headless Chrome) in GitHub Actions and send it to the owner; never posts', implemented: true },
+  poster_render: { description: 'Render a 1080x1350 (4:5) editorial book poster (HTML + headless Chrome) in GitHub Actions and send it to the owner; never posts', implemented: true },
   promo_video: { description: 'Render 9:16 promo videos (book cover + Khmer text) in GitHub Actions and send them to the owner in Telegram; never posts', implemented: true },
   website_ops_api: { description: 'Read the website catalog and statistics (/api/ai/ops, read-only); apply only owner-approved, whitelisted, verified changes', implemented: true },
   github_pull_request: { description: 'Run the Laravel Developer job on the private website repo: branch, edit, test, open a pull request', implemented: true },

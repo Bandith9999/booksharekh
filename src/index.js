@@ -53,18 +53,19 @@ async function getJob(env, id, request) {
   if (deploy) return json({ ...job, deploy_sha: deployShaOf(deploy) });
   // Promo jobs get the approved script (the same artifact the approval is bound to) and the voice.
   if (job.task_type === 'book_promo') {
-    // v5 runner: Gemini voice-over from /job-voice and Khmer text drawn by Chrome in the AI's font.
-    if (Number(request.headers.get('X-Runner-Version') || 0) < 5) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
+    // v6 runner: Gemini voice-over from /job-voice, Khmer text drawn by Chrome, and the AI's visual styles.
+    if (Number(request.headers.get('X-Runner-Version') || 0) < 6) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
     const promo = await promoOf(env, id);
     // Fallback voice (edge-tts) when Gemini TTS is not available.
     const voice = /^km-KH-[A-Za-z]+Neural$/.test(env.PROMO_VOICE || '') ? env.PROMO_VOICE : 'km-KH-SreymomNeural';
     return json({ ...job, videos: (promo?.videos || []).slice(0, 1).map(v => ({ scenes: v.scenes, covers: v.covers || [], voice, tts: 'gemini',
-      font: v.design?.font || 'kantumruy', palette: v.design?.palette || 'brand_night',
+      kind: v.kind || 'website', style: v.design?.style || 'card',
+      font: v.design?.font || 'kantumruy', body_font: v.design?.body_font || 'kantumruy', palette: v.design?.palette || 'brand_night',
       background_url: v.background?.url || null, logo_url: v.logo_url || null })) });
   }
-  // Poster jobs get the approved poster text and design; they need the runner with the designs renderer (v4).
+  // Poster jobs get the approved poster text and design; they need the runner with the editorial 4:5 renderer (v6).
   if (job.task_type === 'poster') {
-    if (Number(request.headers.get('X-Runner-Version') || 0) < 4) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
+    if (Number(request.headers.get('X-Runner-Version') || 0) < 6) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
     const p = await posterOf(env, id);
     return json({ ...job, posters: (p?.posters || []).slice(0, 1).map(posterJob) });
   }

@@ -12,14 +12,24 @@ test('topic keywords: filler words dropped, plurals trimmed', () => {
   assert.deepEqual(topicKeywords('poster'), []);
 });
 
-test('designs: valid, and never the same layout, palette or font as the last poster', () => {
-  const last = { layout: 'fan', palette: 'sunset', font: 'koulen', decor: 'glow' };
-  const d = pickDesign({ layout: 'fan', palette: 'sunset', font: 'koulen', decor: 'dots' }, [last]);
-  assert.notEqual(d.layout, 'fan'); assert.notEqual(d.palette, 'sunset'); assert.notEqual(d.font, 'koulen');
+test('designs: valid, never the same palette or font as the last poster; the layout follows the content', () => {
+  const last = { layout: 'list', palette: 'cream', font: 'fasthand', decor: 'none' };
+  const d = pickDesign({ layout: 'list', palette: 'cream', font: 'fasthand', decor: 'tape' }, [last]);
+  assert.equal(d.layout, 'list', 'a list of books may follow a list of books');
+  assert.notEqual(d.palette, 'cream'); assert.notEqual(d.font, 'fasthand');
   for (const k of Object.keys(POSTER_DESIGN)) assert.ok(POSTER_DESIGN[k].includes(d[k]), k);
-  assert.deepEqual(pickDesign({ layout: 'nope', palette: 'x' }, []).layout !== undefined, true);
-  assert.equal(pickDesign({ layout: 'list', palette: 'peach', font: 'moul', decor: 'none' }, [{ layout: 'list', palette: 'mint', font: 'noto' }], { topic: true }).layout, 'list',
-    'a topic poster may keep the list layout');
+  assert.equal(pickDesign({ layout: 'nope', palette: 'x' }, [], { kind: 'motivation' }).layout, 'quote');
+  assert.equal(pickDesign({ layout: 'nope' }, [], { kind: 'books' }).layout, 'list');
+});
+
+test('no price talk outside website posters; the website comes up only 1 time in 10', async () => {
+  const { POSTER_THEMES, posterFacts } = await import('../src/marketing/poster.js');
+  assert.equal(POSTER_THEMES.filter(t => t.kind === 'website').length, 1);
+  assert.ok(POSTER_THEMES.length >= 10);
+  assert.doesNotMatch(posterFacts({ kind: 'books' }).join('\n'), /\$0\.50|KHQR/);
+  assert.doesNotMatch(posterFacts({ topic: '3 books about love' }).join('\n'), /\$0\.50/);
+  assert.match(posterFacts({ kind: 'website' }).join('\n'), /\$0\.50/);
+  assert.match(posterFacts({ topic: 'why our website is cheap' }).join('\n'), /\$0\.50/);
 });
 
 test('/poster <topic>: the topic reaches the AI and the site is searched for matching books first', async () => {

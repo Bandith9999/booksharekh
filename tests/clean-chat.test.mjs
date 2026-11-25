@@ -53,3 +53,24 @@ test('an approval too old to delete loses its buttons instead', async () => {
   assert.equal(edit.length, 1);
   assert.deepEqual(edit[0].body.reply_markup, { inline_keyboard: [] });
 });
+
+test('a step that finished before the "✅ running…" note was sent: the late note is removed at once', async () => {
+  const { clearTrail } = await import('../src/telegram.js');
+  const env = makeEnv();
+  const calls = mockFetch([telegramWithIds(), routes.workflowOk, routes.dispatchOk]);
+  const { task, approve } = await planTask(env, calls);
+  await clearTrail(env, task.id); // the result was already sent (fast step)
+  await telegram(env, tapOn(approve, 102));
+  const noteId = method(calls, 'sendMessage').length + 100; // the "running" note is the last message sent
+  assert.ok(method(calls, 'deleteMessage').map(c => c.body.message_id).includes(noteId), 'late "running" note deleted');
+  assert.deepEqual(trail(env), [], 'nothing left behind');
+});
+
+test('a normal approval keeps the "✅ running…" note until the result arrives', async () => {
+  const env = makeEnv();
+  const calls = mockFetch([telegramWithIds(), routes.workflowOk, routes.dispatchOk]);
+  const { approve } = await planTask(env, calls);
+  await telegram(env, tapOn(approve, 102));
+  assert.deepEqual(method(calls, 'deleteMessage').map(c => c.body.message_id), [102], 'only the tapped approval');
+  assert.ok(trail(env).length >= 1, 'the note waits for the result');
+});

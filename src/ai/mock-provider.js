@@ -18,25 +18,26 @@ function managerPlan({ taskType, request }) {
 }
 
 // Video Creator promo script about the website (demo text; a real provider writes the Khmer copy).
-function promoScripts({ theme = '' }) {
+function promoScripts({ theme = '', kind, candidate_ids = [] }) {
   return {
-    title: 'BookShareKH [DEMO]', background: 'dist/img/library-bg.jpg',
-    design: { font: 'kdamthmor', body_font: 'battambang', palette: 'ocean' }, voice_style: 'warm, upbeat young Cambodian woman, medium pace',
+    title: 'BookShareKH [DEMO]', kind: kind || 'education', background: 'dist/img/library-bg.jpg',
+    concept: 'Hook with a question, one simple idea from a book, an everyday example, end with a question to the viewer. Calm minimal look.',
+    design: { style: 'minimal', font: 'kdamthmor', body_font: 'battambang', palette: 'ocean' }, voice_style: 'calm, warm young Cambodian woman, thoughtful pace',
+    cover_ids: candidate_ids.slice(0, 2),
     scenes: [
-      { text: 'ចង់អានសៀវភៅល្អៗ?', voice: 'ចង់អានសៀវភៅល្អៗមែនទេ?' },
-      { text: 'តម្លៃត្រឹមតែ $0.50', voice: 'តម្លៃត្រឹមតែហាសិបសេនក្នុងមួយក្បាល' },
-      { text: 'ចូលមើល booksharekh.com', voice: 'ចូលមើល booksharekh.com ឥឡូវនេះ' },
+      { text: 'ចង់អានសៀវភៅល្អៗ?', voice: 'ចង់អានសៀវភៅល្អៗមែនទេ?', book: -1 },
+      { text: 'អានមួយថ្ងៃ ១០ ទំព័រ', voice: 'សាកអានមួយថ្ងៃដប់ទំព័រ', book: 0 },
+      { text: 'តើអ្នកនឹងចាប់ផ្តើមថ្ងៃណា?', voice: 'តើអ្នកនឹងចាប់ផ្តើមថ្ងៃណា?', book: 1 },
     ],
-    caption: `[DEMO] ${clamp(theme, 80)}\nអានសៀវភៅលើ BookShareKH\n📖 booksharekh.com`, hashtags: ['#BookShareKH', '#សៀវភៅ', '#Books'],
+    caption: `[DEMO] ${clamp(theme, 80)}\nតើអ្នកអានប៉ុន្មានទំព័រក្នុងមួយថ្ងៃ?\n📖 booksharekh.com`, hashtags: ['#BookShareKH', '#សៀវភៅ', '#Books'],
   };
 }
 
 // Content Creator poster text (demo).
-const posterText = ({ candidate_ids = [] } = {}) => ({ cover_ids: candidate_ids.slice(0, 5),
-  title: 'Poster [DEMO]', design: { layout: 'fan', palette: 'brand_night', font: 'koulen', body_font: 'kantumruy', decor: 'glow' }, background: 'dist/img/library-bg.jpg',
-  kicker: '', headline: 'អានសៀវភៅល្អៗ គ្រប់ពេល', highlight: 'សៀវភៅល្អៗ', subline: 'សៀវភៅច្រើនប្រភេទ នៅកន្លែងតែមួយ', book_notes: [],
-  points: ['តម្លៃ $0.50', 'បញ្ចូលលុយតាម KHQR'], cta: 'ចូលមើលឥឡូវនេះ',
-  caption: '[DEMO] អានសៀវភៅលើ BookShareKH\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#សៀវភៅ', '#Reading'],
+const posterText = ({ candidate_ids = [] } = {}) => ({ cover_ids: candidate_ids.slice(0, 2), kind: 'books',
+  title: 'Poster [DEMO]', design: { layout: 'list', palette: 'cream', font: 'fasthand', body_font: 'kantumruy', decor: 'none' },
+  heading: 'ស្នេហា និងទំនាក់ទំនង', quote: '', book_notes: ['រឿងស្នេហាដ៏ស្រទន់ ពោរពេញដោយអារម្មណ៍', 'រឿងដែលធ្វើឲ្យអ្នកគិតយូរ'],
+  caption: '[DEMO] តើអ្នកនឹងអានសៀវភៅមួយណាមុន?\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#សៀវភៅ', '#Reading'],
 });
 
 // Website Operations (demo): every book gets the last listed genre; reviews mentioning "buy now" are spam.

@@ -63,7 +63,25 @@ export async function clearTrail(env, taskId) {
       for (let i = 0; i < ids.length; i += 100) await tg(env, 'deleteMessages', { chat_id, message_ids: ids.slice(i, i + 100) }).catch(() => {});
     }
     await env.DB.prepare('DELETE FROM settings WHERE key LIKE ?').bind(`${trailPrefix(taskId)}%`).run();
+    // Remember when the result was sent (see dropIfFinished); old marks are pruned.
+    await env.DB.prepare(`INSERT INTO settings (key,value,updated_at) VALUES (?, 'final', CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET updated_at=CURRENT_TIMESTAMP`).bind(`${FINAL}${taskId}`).run();
+    await env.DB.prepare("DELETE FROM settings WHERE key LIKE 'tg_final:%' AND updated_at < datetime('now','-1 day')").run();
   } catch (e) { console.error('clear trail failed', String(e)); }
+}
+
+// A fast step (publish a book, merge a PR) can finish and send its result before the "✅ running…"
+// note of the approval tap is sent. That late note is removed at once instead of staying under the result.
+const FINAL = 'tg_final:';
+export async function dropIfFinished(env, taskId, sent) {
+  const m = sent?.result;
+  if (!taskId || !m?.message_id) return;
+  try {
+    const done = await env.DB.prepare("SELECT 1 FROM settings WHERE key=? AND updated_at >= datetime('now','-5 minutes')").bind(`${FINAL}${taskId}`).first();
+    if (!done) return;
+    await removeMessage(env, m);
+    await env.DB.prepare('DELETE FROM settings WHERE key=?').bind(`${trailPrefix(taskId)}${m.chat.id}:${m.message_id}`).run();
+  } catch (e) { console.error('drop late note failed', String(e)); }
 }
 
 // Delete one message (e.g. the approval whose button was tapped). Telegram refuses deletes of messages
