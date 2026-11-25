@@ -1,7 +1,7 @@
 // Telegram commands and button handlers. Every entry point checks the owner first.
 import { clamp, isOwner, parseCommand, parseMemory, parseTaskRef, githubHint } from './helpers.js';
 import { audit, findTask, getAgentOverride, listAgentTasks } from './db.js';
-import { removeMessage, reply, taskReply, tg } from './telegram.js';
+import { dropIfFinished, removeMessage, reply, taskReply, tg } from './telegram.js';
 import { AGENTS, TOOLS, isImplemented, validateRegistry } from './agents/registry.js';
 import { chainLabel, cooldownOf, fallbackRoute, freeModels, paidEnabled, resolveChain, resolveRoute, validateRoute } from './ai/model-router.js';
 import { PROVIDER_NAMES, getProvider, normalizeProvider } from './ai/provider-factory.js';
@@ -433,7 +433,10 @@ export async function handleCallback(env, q) {
     // a rejection is the task's result.
     await removeMessage(env, q.message);
     const text = decisionText(kind, r, env);
-    return r.ok ? taskReply(env, chat, r.approval.task_id, text, { final: kind === 'reject' }) : reply(env, chat, text);
+    if (!r.ok) return reply(env, chat, text);
+    const sent = await taskReply(env, chat, r.approval.task_id, text, { final: kind === 'reject' });
+    if (kind === 'approve') await dropIfFinished(env, r.approval.task_id, sent);
+    return sent;
   }
   if ((m = /^cx:(BSK-[a-f0-9-]{36})$/.exec(data))) {
     const r = await cancelTask(env, m[1], user);

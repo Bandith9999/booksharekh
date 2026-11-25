@@ -1,7 +1,14 @@
 // Renders one BookShareKH promo video (9:16) from a job JSON. Runs on the GitHub runner and locally.
 //   node scripts/promo_render.mjs <job.json> <out.mp4> [--no-voice]
-// job: { scenes: [{ text, voice }], covers: [https urls], tts: "gemini", voice: "km-KH-SreymomNeural",
-//        font, body_font, palette, background_url, logo_url }
+// job: { scenes: [{ text, voice, book }], covers: [https urls], tts: "gemini", voice: "km-KH-SreymomNeural",
+//        kind, style, font, body_font, palette, background_url, logo_url }
+// - style (chosen by the Video Creator AI, owner request 2026-11-25: not the same look every time):
+//   card      text on a colour card at the top, covers fanned below (the original look)
+//   cinematic full-screen cover (the scene's book) or photo, slowly zooming, big text over it
+//   minimal   calm plain colour, centred text without a card, small covers in a row
+//   spotlight text card at the top, the scene's own book large below it, changing with the scene
+// - scene.book: index in covers of the book the scene talks about (-1: none).
+// - Only website videos end with the booksharekh.com button; others keep a small brand line.
 // - Voice-over: Gemini text-to-speech (made by the AI Manager from the approved script, /job-voice);
 //   if Gemini is not available, edge-tts; if neither works, the video is made without voice.
 //   All scenes use the same voice, or none (a half-voiced video looks broken).
@@ -59,8 +66,28 @@ export function wrapKhmer(text, max = 13) {
   return lines.slice(0, 4);
 }
 
-// One scene's text as a transparent 720x1280 layer: a card near the top in the palette's colours.
-export function sceneHtml({ lines, index, count, font, body_font, palette, last }) {
+export const STYLES = ['card', 'cinematic', 'minimal', 'spotlight'];
+// Where and how the scene text sits, per style.
+function styleCss(style, p, f) {
+  const big = Math.round(66 * f.scale);
+  switch (style) {
+    case 'cinematic': return `.card{position:absolute;left:40px;right:40px;top:640px;text-align:center}
+.t{font-size:${Math.round(big * 1.08)}px;color:#fff;text-shadow:0 4px 22px rgba(0,0,0,.85),0 0 4px rgba(0,0,0,.6)}
+.t .l:nth-child(2n){color:${p.a1}}.dots i{background:#fff}`;
+    case 'minimal': return `.card{position:absolute;left:56px;right:56px;top:260px;text-align:center}
+.t{font-size:${big}px;color:${p.light ? p.ink : '#ffffff'}}.t .l:nth-child(2n){color:${p.a1}}
+.card:before{content:'';display:block;width:90px;height:6px;border-radius:3px;background:${p.a1};margin:0 auto 34px}.dots i{background:${p.light ? p.ink : '#fff'}}`;
+    case 'spotlight': return `.card{position:absolute;left:36px;right:36px;top:120px;padding:28px 30px 32px;border-radius:30px;
+  background:${p.light ? `${p.bg1}f2` : `${p.bg2}e6`};border-left:10px solid ${p.a1};box-shadow:0 18px 50px rgba(0,0,0,.45);text-align:left}
+.t{font-size:${Math.round(big * 0.9)}px;color:${p.ink}}.t .l:nth-child(2n){color:${p.a1}}.dots{justify-content:flex-start}.dots i{background:${p.ink}}`;
+    default: return `.card{position:absolute;left:36px;right:36px;top:150px;padding:34px 34px 40px;border-radius:30px;
+  background:${p.light ? `${p.bg1}f2` : `${p.bg2}d9`};border-top:8px solid ${p.a1};box-shadow:0 18px 50px rgba(0,0,0,.45);text-align:center}
+.t{font-size:${big}px;color:${p.ink}}.t .l:nth-child(2n){color:${p.a1}}.dots i{background:${p.ink}}`;
+  }
+}
+
+// One scene's text as a transparent 720x1280 layer, placed according to the style.
+export function sceneHtml({ lines, index, count, font, body_font, palette, last, style = 'card', cta = false }) {
   const p = PALETTES[palette] || PALETTES.brand_night;
   const f = fontOf(font), bf = bodyFontOf(body_font);
   const dots = Array.from({ length: count }, (_, i) => `<i class="${i === index ? 'on' : ''}"></i>`).join('');
@@ -68,16 +95,15 @@ export function sceneHtml({ lines, index, count, font, body_font, palette, last 
 ${fontFaces([font, body_font])}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{width:${W}px;height:${H}px;overflow:hidden;background:transparent}
-.card{position:absolute;left:36px;right:36px;top:150px;padding:34px 34px 40px;border-radius:30px;
-  background:${p.light ? `${p.bg1}f2` : `${p.bg2}d9`};border-top:8px solid ${p.a1};box-shadow:0 18px 50px rgba(0,0,0,.45);text-align:center}
-.t{font-family:'${f.family}','Noto Sans Khmer',sans-serif;font-weight:700;font-size:${Math.round(66 * f.scale)}px;line-height:1.55;color:${p.ink};white-space:nowrap}
-.t .l:nth-child(2n){color:${p.a1}}
-.dots{margin-top:22px;display:flex;justify-content:center;gap:10px}.dots i{width:12px;height:12px;border-radius:50%;background:${p.ink};opacity:.3}.dots i.on{opacity:1;background:${p.a2}}
+.t{font-family:'${f.family}','Noto Sans Khmer',sans-serif;font-weight:700;line-height:1.55;white-space:nowrap}
+.dots{margin-top:22px;display:flex;justify-content:center;gap:10px}.dots i{width:12px;height:12px;border-radius:50%;opacity:.3}
+${styleCss(STYLES.includes(style) ? style : 'card', p, f)}
+.dots i.on{opacity:1;background:${p.a2}}
 .cta{margin-top:20px}
 .cta span{display:inline-block;font-family:'Poppins','${bf.family}',sans-serif;font-weight:800;font-size:38px;color:#fff;background:${p.a1};border-radius:50px;padding:10px 38px 14px;box-shadow:0 10px 24px rgba(0,0,0,.35)}
 </style></head><body>
-<div class="card"><div class="t" data-fit="${last ? 360 : 430}">${lines.map(l => `<div class="l">${esc(l)}</div>`).join('')}</div>
-${last ? '<div class="cta"><span>booksharekh.com</span></div>' : ''}<div class="dots">${dots}</div></div>
+<div class="card"><div class="t" data-fit="${last && cta ? 360 : 430}">${lines.map(l => `<div class="l">${esc(l)}</div>`).join('')}</div>
+${last && cta ? '<div class="cta"><span>booksharekh.com</span></div>' : ''}<div class="dots">${dots}</div></div>
 ${FIT_SCRIPT}
 </body></html>`;
 }
@@ -144,6 +170,7 @@ export async function renderPromo(job, outFile, { voice: useVoice = true } = {})
   const work = join(dirname(outFile), 'promo-work');
   mkdirSync(work, { recursive: true });
   const raw = (job.scenes || []).filter(s => s?.text).slice(0, 6);
+  const style = STYLES.includes(job.style) ? job.style : 'card';
   if (!raw.length) throw new Error('No scenes');
 
   const vo = useVoice ? await voiceOver(job, raw, work) : { engine: null, files: [] };
@@ -153,7 +180,7 @@ export async function renderPromo(job, outFile, { voice: useVoice = true } = {})
   let t = 0.3;
   const scenes = raw.map((s, i) => {
     const len = voiced ? probeDuration(vo.files[i]) + 0.45 : Math.min(Math.max(graphemes(s.text) * 0.11 + 1.6, 2.6), 5);
-    const sc = { lines: wrapKhmer(s.text, 12), start: t, end: t + len, dur: len };
+    const sc = { lines: wrapKhmer(s.text, 12), start: t, end: t + len, dur: len, book: Number.isInteger(s.book) ? s.book : -1 };
     t += len;
     return sc;
   });
@@ -162,7 +189,7 @@ export async function renderPromo(job, outFile, { voice: useVoice = true } = {})
   // Text layers (Chrome): one per scene + the brand line.
   const layers = scenes.map((s, i) => {
     const html = join(work, `scene${i}.html`), png = join(work, `scene${i}.png`);
-    writeFileSync(html, sceneHtml({ lines: s.lines, index: i, count: scenes.length, font: job.font, body_font: job.body_font, palette: job.palette, last: i === scenes.length - 1 }), 'utf8');
+    writeFileSync(html, sceneHtml({ lines: s.lines, index: i, count: scenes.length, font: job.font, body_font: job.body_font, palette: job.palette, last: i === scenes.length - 1, style, cta: job.kind === 'website' }), 'utf8');
     screenshot(html, png, W, H);
     return png;
   });
@@ -170,49 +197,75 @@ export async function renderPromo(job, outFile, { voice: useVoice = true } = {})
   writeFileSync(join(work, 'brand.html'), brandHtml(job.palette), 'utf8');
   screenshot(join(work, 'brand.html'), brandPng, W, H);
 
-  // Covers (visuals only): up to 3, fanned in the middle, sliding up one after another.
-  const covers = [];
+  // Covers: up to 3. coverAt keeps the AI's positions (scene.book) even if a download fails.
+  const coverAt = [];
   for (const [i, url] of (job.covers || []).slice(0, 3).entries()) {
     const f = join(work, `cover${i}.img`);
-    if (await downloadCover(url, f)) covers.push(f);
+    coverAt.push(await downloadCover(url, f) ? f : null);
   }
-  // Website images: a background photo chosen by the AI and the logo (both optional).
+  const covers = coverAt.filter(Boolean);
+  const sceneCover = s => coverAt[s.book] || null;
+  // Website images: a background photo chosen by the AI and the logo (both optional). Minimal stays plain.
   const bgFile = join(work, 'background.img'), logoFile = join(work, 'logo.img');
-  const hasBg = await downloadCover(job.background_url, bgFile);
+  const hasBg = style !== 'minimal' && await downloadCover(job.background_url, bgFile);
   const hasLogo = await downloadCover(job.logo_url, logoFile);
   const pal = PALETTES[job.palette] || PALETTES.brand_night;
-  const inputs = ['-f', 'lavfi', '-t', String(total), '-i', `color=c=0x${pal.bg2.slice(1)}:s=${W}x${H}:r=${FPS}`];
+  const inputs = ['-f', 'lavfi', '-t', String(total), '-i', `color=c=0x${(style === 'minimal' ? pal.bg1 : pal.bg2).slice(1)}:s=${W}x${H}:r=${FPS}`];
   let n = 1;
   const add = file => { inputs.push('-loop', '1', '-t', String(total), '-i', file); return n++; };
-  const bgIdx = hasBg ? add(bgFile) : -1;
-  const coverIdx = covers.map(add);
-  const logoIdx = hasLogo ? add(logoFile) : -1;
-  const layerIdx = layers.map(add);
-  const brandIdx = add(brandPng);
   const parts = [];
-  let base = '[0:v]';
-  // Background: the website photo (lightly blurred, darkened, slow pan) or else the first cover, blurred.
-  if (hasBg) {
-    const BW = Math.round(W * 1.12 / 2) * 2, BH = Math.round(H * 1.12 / 2) * 2; // 12% larger for the slow pan
-    parts.push(`[${bgIdx}:v]scale=${BW}:${BH}:force_original_aspect_ratio=increase,crop=${BW}:${BH},boxblur=4:1,eq=brightness=-0.30:saturation=0.9,` +
-      `crop=${W}:${H}:x='(iw-${W})/2*(1-t/${total.toFixed(2)})':y='(ih-${H})/2',setsar=1[bgc]`);
-  } else if (covers.length) {
-    parts.push(`[${coverIdx[0]}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=30:2,eq=brightness=-0.32:saturation=0.8,setsar=1[bgc]`);
+  let base = '[0:v]', k = 0;
+  const over = (label, xy, enable) => { parts.push(`${base}[${label}]overlay=${xy}${enable ? `:enable='${enable}'` : ''}[o${k}]`); base = `[o${k++}]`; };
+  const during = s => `between(t,${s.start.toFixed(2)},${s.end.toFixed(2)})`;
+  const BW = Math.round(W * 1.12 / 2) * 2, BH = Math.round(H * 1.12 / 2) * 2; // 12% larger for the slow pan / zoom
+  const slowPan = (idx, label, look, from = 0, len = total) => parts.push(`[${idx}:v]scale=${BW}:${BH}:force_original_aspect_ratio=increase,crop=${BW}:${BH},${look},` +
+    `crop=${W}:${H}:x='(iw-${W})/2*(1-(t-${from.toFixed(2)})/${len.toFixed(2)})':y='(ih-${H})/2*(1-(t-${from.toFixed(2)})/${len.toFixed(2)})',setsar=1[${label}]`);
+  const framed = (idx, w, label) => { const h = Math.round(w * 1.5);
+    parts.push(`[${idx}:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w + 8}:${h + 8}:(ow-iw)/2:(oh-ih)/2:color=white,setsar=1[${label}]`); };
+
+  if (style === 'cinematic') {
+    // Each scene: its own book cover (or the first cover, or the photo) full-screen, slowly moving.
+    scenes.forEach((s, i) => {
+      const file = sceneCover(s) || covers[i % Math.max(covers.length, 1)] || (hasBg ? bgFile : null);
+      if (!file) return;
+      slowPan(add(file), `cb${i}`, 'boxblur=3:1,eq=brightness=-0.36:saturation=0.95', s.start, s.dur + 1);
+      over(`cb${i}`, '0:0', i === scenes.length - 1 ? `gte(t,${s.start.toFixed(2)})` : during(s));
+    });
+  } else if (style !== 'minimal' && (hasBg || covers.length)) {
+    // Card and spotlight: the website photo (slow pan) or else the first cover, blurred.
+    if (hasBg) slowPan(add(bgFile), 'bgc', 'boxblur=4:1,eq=brightness=-0.30:saturation=0.9');
+    else parts.push(`[${add(covers[0])}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=30:2,eq=brightness=-0.32:saturation=0.8,setsar=1[bgc]`);
+    over('bgc', '0:0');
   }
-  if (hasBg || covers.length) { parts.push(`${base}[bgc]overlay=0:0[b0]`); base = '[b0]'; }
-  if (covers.length) {
-    // Layout: side covers smaller and behind, centre cover in front (lower half, under the text card).
+  if (style === 'card' && covers.length) {
+    // Side covers smaller and behind, centre cover in front (lower half, under the text card), sliding up.
     const slots = covers.length === 1 ? [{ w: 330, x: (W - 330) / 2, y: 640, d: 0.2 }]
       : covers.length === 2 ? [{ w: 270, x: 80, y: 660, d: 0.2 }, { w: 270, x: W - 350, y: 660, d: 0.45 }]
         : [{ w: 220, x: 40, y: 690, d: 0.35 }, { w: 220, x: W - 260, y: 690, d: 0.55 }, { w: 290, x: (W - 290) / 2, y: 640, d: 0.15 }];
     const order = covers.length === 3 ? [1, 2, 0] : covers.map((_, i) => i); // centre slot uses the first cover
-    slots.forEach((s, k) => {
-      const h = Math.round(s.w * 1.5);
-      parts.push(`[${coverIdx[order[k]]}:v]scale=${s.w}:${h}:force_original_aspect_ratio=decrease,pad=${s.w + 8}:${h + 8}:(ow-iw)/2:(oh-ih)/2:color=white,setsar=1[c${k}]`);
-      parts.push(`${base}[c${k}]overlay=x=${Math.round(s.x)}:y='${s.y}+720*max(0\\,1-max(0\\,t-${s.d})/0.6)'[b${k + 1}]`);
-      base = `[b${k + 1}]`;
+    slots.forEach((sl, j) => {
+      framed(add(covers[order[j]]), sl.w, `c${j}`);
+      over(`c${j}`, `x=${Math.round(sl.x)}:y='${sl.y}+720*max(0\,1-max(0\,t-${sl.d})/0.6)'`);
+    });
+  } else if (style === 'minimal' && covers.length) {
+    // A calm row of small covers under the text, appearing one after another.
+    const w = 170, gap = 36, x0 = Math.round((W - (covers.length * (w + 8) + (covers.length - 1) * gap)) / 2);
+    covers.forEach((f, j) => {
+      framed(add(f), w, `m${j}`);
+      over(`m${j}`, `x=${x0 + j * (w + 8 + gap)}:y=780`, `gte(t,${(0.4 + j * 0.35).toFixed(2)})`);
+    });
+  } else if (style === 'spotlight') {
+    // The book each scene talks about, large under the text card, sliding up when its scene starts.
+    scenes.forEach((s, i) => {
+      const file = sceneCover(s);
+      if (!file) return;
+      framed(add(file), 320, `sp${i}`);
+      over(`sp${i}`, `x=(W-w)/2:y='520+300*max(0\,1-(t-${s.start.toFixed(2)})/0.45)'`, during(s));
     });
   }
+  const logoIdx = hasLogo ? add(logoFile) : -1;
+  const layerIdx = layers.map(add);
+  const brandIdx = add(brandPng);
   // Logo: small, centred at the top, on a white rounded badge so it reads on any background.
   if (hasLogo) {
     parts.push(`[${logoIdx}:v]scale=78:78:force_original_aspect_ratio=decrease,pad=96:96:(ow-iw)/2:(oh-ih)/2:color=white@0.92,format=rgba,setsar=1[logo]`);

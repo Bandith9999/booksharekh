@@ -1,11 +1,12 @@
-// Renders one BookShareKH poster as a full-portrait TikTok photo post (1080x1920, 9:16). HTML → PNG
-// with headless Chrome. The Content Creator AI picks a design for every poster so they do not all look
-// the same: a layout, a colour palette, a Khmer headline font and a decoration (see DESIGNS below).
+// Renders one BookShareKH poster as a 4:5 portrait post (1080x1350). HTML → PNG with headless Chrome.
+// Style (owner request 2026-11-25): a calm, editorial "book recommendation" card like bookstagram posts:
+// a paper-coloured card, a hand-lettered heading, book covers with "Title by Author" and a short Khmer
+// note about each book. No button and no website address on the image; only a small BookShareKH
+// signature in the corner. The Content Creator AI picks the layout, palette, fonts and decoration.
 //   node scripts/poster_render.mjs <job.json> <out.png>
-// job: { layout, palette, font, decor, kicker, headline, highlight, subline, points: [..], cta,
-//        covers: [https urls], books: [{ title, note }], logo_url, background_url }
-// TikTok draws its buttons on the right edge and the caption over the bottom ~300 px: key content
-// stays inside a safe area (left 60, right 140, bottom 330). Text shrinks to fit its box (any font).
+// job: { layout, palette, font, body_font, decor, heading, quote, covers: [https urls],
+//        books: [{ title, author, note }], logo_url }
+// Text shrinks to fit its box (any font).
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -13,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { fetchImage } from './fetch_image.mjs';
 import { KHMER_FONTS, bodyFontOf, fontFaces, fontOf } from './khmer_fonts.mjs';
 
-export const W = 1080, H = 1920;
+export const W = 1080, H = 1350;
 
 const CHROMES = [process.env.CHROME, 'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser',
   'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].filter(Boolean);
@@ -44,9 +45,7 @@ document.fonts.ready.then(() => {
 });
 </script>`;
 
-// ---------- design choices (keep in sync with POSTER_DESIGN in src/marketing/poster.js) ----------
-export const FONTS_KM = KHMER_FONTS; // headline fonts: scripts/khmer_fonts.mjs
-// light: dark text on a light background.
+// Video palettes (scripts/promo_render.mjs). light: dark text on a light background.
 export const PALETTES = {
   brand_night: { bg1: '#264653', bg2: '#1f2a44', ink: '#ffffff', sub: '#e7edf3', a1: '#f27f6b', a2: '#b6d433', chipInk: '#1f2a44' },
   sunset: { bg1: '#ff7e5f', bg2: '#6a2c70', ink: '#ffffff', sub: '#ffe9e0', a1: '#ffd166', a2: '#ffffff', chipInk: '#6a2c70' },
@@ -58,8 +57,21 @@ export const PALETTES = {
   peach: { bg1: '#ffe5d9', bg2: '#ffcad4', ink: '#3d405b', sub: '#5c5f7a', a1: '#e07a5f', a2: '#81b29a', chipInk: '#ffffff', light: true },
   mint: { bg1: '#e8f6ef', bg2: '#c7ebdc', ink: '#1d3557', sub: '#36506e', a1: '#e63946', a2: '#457b9d', chipInk: '#ffffff', light: true },
 };
-export const LAYOUTS = ['fan', 'spotlight', 'list', 'grid', 'magazine', 'arc'];
-export const DECORS = ['glow', 'dots', 'stripes', 'circles', 'waves', 'none'];
+
+// ---------- poster design choices (keep in sync with POSTER_DESIGN in src/marketing/poster.js) ----------
+// outer: page colour, card: the inner card, ink: headings, sub: notes, a1: accent, a2: soft accent.
+export const POSTER_PALETTES = {
+  cream: { outer: '#fbf6ee', card: '#f3ebdd', ink: '#1c1a17', sub: '#2f2b26', a1: '#c96f53', a2: '#e8c9a0' },
+  sage: { outer: '#f1f4ed', card: '#e1e8da', ink: '#1f2a1f', sub: '#33402f', a1: '#5f7f5a', a2: '#c9d8b6' },
+  blush: { outer: '#fcf1ef', card: '#f5dfdb', ink: '#2b1d1f', sub: '#43302f', a1: '#c8566b', a2: '#f0bcc4' },
+  sky: { outer: '#f0f5f9', card: '#dde9f1', ink: '#14263a', sub: '#2c3f52', a1: '#3d6fa3', a2: '#b9d3e8' },
+  lavender: { outer: '#f5f2f9', card: '#e6e0f0', ink: '#231c33', sub: '#3a3150', a1: '#7a5ea8', a2: '#cfc2e6' },
+  sand: { outer: '#f8f1e6', card: '#ecdfc8', ink: '#2a2118', sub: '#45392b', a1: '#9c6b30', a2: '#d9bf8f' },
+  night: { outer: '#161a24', card: '#212736', ink: '#f4efe6', sub: '#dcd5c9', a1: '#e9b872', a2: '#4a5670', dark: true },
+};
+export const LAYOUTS = ['list', 'single', 'quote'];
+export const DECORS = ['none', 'frame', 'tape', 'sparkle'];
+export const FONTS_KM = KHMER_FONTS; // heading fonts: scripts/khmer_fonts.mjs
 
 // Through the AI Manager on the GitHub runner (the site's firewall blocks GitHub servers).
 async function dataUri(url, maxBytes = 8 * 1024 * 1024) {
@@ -67,159 +79,92 @@ async function dataUri(url, maxBytes = 8 * 1024 * 1024) {
   return img ? `data:${img.type};base64,${img.bytes.toString('base64')}` : null;
 }
 
-const cover = (src, style, cls = 'book') => `<img class="${cls}" style="${style}" src="${src}">`;
-const coverStyle = (w, x, y, r = 0, z = 1) => `width:${w}px;height:${Math.round(w * 1.5)}px;left:${x}px;top:${y}px;transform:rotate(${r}deg);z-index:${z}`;
+// The card's inner area (the outer page shows as a margin around it, like the reference post).
+const CARD = { top: 46, left: 46, right: W - 46, bottom: H - 64 };
+const INNER = { left: CARD.left + 70, right: CARD.right - 70 };
 
-// The headline, with the AI's highlight word(s) marked (only if they really are in the headline).
-function headlineHtml(headline, highlight) {
-  const h = esc(headline), m = esc(highlight || '').trim();
-  return m && h.includes(m) ? h.replace(m, `<span class="hl">${m}</span>`) : h;
-}
+const tape = (decor, w) => (decor === 'tape' ? `<span class="tape" style="left:${Math.round(w / 2 - 55)}px"></span>` : '');
+const coverImg = (src, w, h, decor) => `<div class="cv" style="width:${w}px;height:${h}px"><img src="${src}">${tape(decor, w)}</div>`;
+// "Title by Author" like the reference (book titles on the site are in Latin script).
+const bookLine = (b = {}, fit) => `<div class="btitle" data-fit="${fit}">${esc(b.title || '')}${b.author ? ` <span class="by">by ${esc(b.author)}</span>` : ''}</div>`;
 
 function decorHtml(decor, p) {
   switch (decor) {
-    case 'glow': return `<div class="deco" style="width:600px;height:600px;border-radius:50%;filter:blur(70px);background:${p.a1};opacity:.3;top:-180px;right:-220px"></div>
-<div class="deco" style="width:540px;height:540px;border-radius:50%;filter:blur(70px);background:${p.a2};opacity:.24;top:960px;left:-280px"></div>`;
-    case 'dots': return `<div class="deco" style="width:420px;height:420px;top:120px;right:-60px;opacity:.35;background:radial-gradient(${p.a2} 5px,transparent 6px) 0 0/34px 34px"></div>
-<div class="deco" style="width:300px;height:300px;top:1180px;left:-40px;opacity:.3;background:radial-gradient(${p.a1} 5px,transparent 6px) 0 0/34px 34px"></div>`;
-    case 'stripes': return `<div class="deco" style="width:1600px;height:240px;top:640px;left:-260px;transform:rotate(-12deg);opacity:.16;background:repeating-linear-gradient(90deg,${p.a1} 0 28px,transparent 28px 64px)"></div>`;
-    case 'circles': return `<div class="deco" style="width:760px;height:760px;border-radius:50%;top:-260px;right:-300px;border:3px solid ${p.a1};opacity:.45;box-shadow:0 0 0 46px transparent,0 0 0 49px ${p.a2}55,0 0 0 96px transparent,0 0 0 99px ${p.a1}33"></div>`;
-    case 'waves': return `<svg class="deco" style="left:0;top:1260px;opacity:.28" width="${W}" height="660" viewBox="0 0 1080 660"><path d="M0 120 C 180 40, 360 200, 540 120 S 900 40, 1080 120 V660 H0Z" fill="${p.a1}"/><path d="M0 210 C 200 130, 380 290, 560 210 S 920 130, 1080 210 V660 H0Z" fill="${p.a2}" opacity=".7"/></svg>`;
+    case 'frame': return `<div class="abs" style="top:${CARD.top + 22}px;left:${CARD.left + 22}px;right:${W - CARD.right + 22}px;bottom:${H - CARD.bottom + 22}px;border:2px solid ${p.a1};opacity:.45;border-radius:6px"></div>`;
+    case 'sparkle': return [[92, 84, 30], [952, 96, 22], [960, 1210, 28], [96, 1226, 20]]
+      .map(([x, y, s]) => `<div class="abs" style="left:${x}px;top:${y}px;font-size:${s}px;color:${p.a1};opacity:.8">✦</div>`).join('');
     default: return '';
   }
 }
 
-const brand = (logo, p, { center = false, small = false } = {}) => `<div class="brandbar" style="${center ? 'justify-content:center;' : ''}">
-${logo ? `<div class="logo${small ? ' sm' : ''}"><img src="${logo}"></div>` : ''}<div><div class="brand${small ? ' sm' : ''}">BookShare<span>KH</span></div><div class="site">booksharekh.com</div></div></div>`;
-const chips = points => points.slice(0, 3).map(x => `<div class="pt">✓ ${esc(x)}</div>`).join('');
-const ctaHtml = cta => `<div class="btn">${esc(cta || 'ចូលមើលឥឡូវនេះ')}</div><div class="url">booksharekh.com</div>`;
-const kickerHtml = k => (k ? `<div class="kicker">${esc(k)}</div>` : '');
-const titleBlock = (j, fit) => `${kickerHtml(j.kicker)}<h1 data-fit="${fit}">${headlineHtml(j.headline, j.highlight)}</h1>${j.subline ? `<p class="sub" data-fit="190">${esc(j.subline)}</p>` : ''}`;
-
 // ---------- layouts ----------
+const TOP = 300; // content starts under the heading
 const LAYOUT = {
-  // Headline on top, covers fanned out in the middle, badges and button below (the classic).
-  fan(j, c) {
-    const slots = [[400, 0, 0, 0, 5], [300, -265, 70, -8, 4], [300, 265, 70, 8, 4], [230, -385, 150, -14, 3], [230, 385, 150, 14, 3]];
-    const wall = c.slice(0, 5).map((s, i) => { const [w, x, y, r, z] = slots[i]; return cover(s, `${coverStyle(w, 0, y, r, z)};left:calc(50% - 50px + ${x}px - ${w / 2}px)`); }).join('');
-    return `<div class="abs" style="top:70px;left:60px;right:140px">${j.brandHtml}</div>
-<div class="abs col" style="top:240px;left:60px;right:140px">${titleBlock(j, 380)}</div>
-<div class="abs" style="top:780px;left:0;right:0;height:620px">${wall}</div>
-<div class="abs row" style="top:1430px;left:60px;right:140px">${chips(j.points)}</div>
-<div class="abs cta" style="top:1560px;left:60px">${ctaHtml(j.cta)}</div>`;
-  },
-  // One big hero book on the right, the others in a column on the left, a bold colour band behind.
-  spotlight(j, c) {
-    const [hero, ...rest] = c;
-    const side = rest.slice(0, 4).map((s, i) => cover(s, coverStyle(150, 60 + (i % 2) * 40, 860 + i * 150, i % 2 ? 4 : -4, 2 + i))).join('');
-    return `<div class="abs" style="top:70px;left:60px;right:140px">${j.brandHtml}</div>
-<div class="abs col" style="top:240px;left:60px;right:140px">${titleBlock(j, 420)}</div>
-<div class="abs band" style="top:900px;left:-80px;width:1300px;height:420px;transform:rotate(-8deg)"></div>
-${side}${hero ? cover(hero, coverStyle(470, 380, 800, 5, 6), 'book hero') : ''}
-<div class="abs row" style="top:1560px;left:60px;right:140px">${chips(j.points)}</div>
-<div class="abs cta" style="top:1660px;left:60px;transform:scale(.9);transform-origin:left top">${ctaHtml(j.cta)}</div>`;
-  },
-  // Numbered book list with title and a short note each: best for "N books about …" posters.
+  // 1-3 rows: cover on the left, "Title by Author" and a short note on the right (the reference post).
   list(j, c) {
-    const n = Math.min(c.length, 5), top = 640, bottom = 1530, rowH = Math.floor((bottom - top) / Math.max(n, 3));
-    const rows = c.slice(0, 5).map((s, i) => {
-      const b = j.books?.[i] || {};
-      const h = rowH - 22, w = Math.round(h / 1.5);
-      return `<div class="lrow" style="top:${top + i * rowH}px;height:${h}px">
-<div class="num">${i + 1}</div>${cover(s, `width:${w}px;height:${h}px;position:relative`, 'book thumb')}
-<div class="ltext"><div class="ltitle" data-fit="${Math.round(h * 0.45)}">${esc(b.title || '')}</div>${b.note ? `<div class="lnote" data-fit="${Math.round(h * 0.5)}">${esc(b.note)}</div>` : ''}</div></div>`;
+    const n = Math.max(Math.min(c.length, 3), 1), area = CARD.bottom - 60 - TOP, rowH = Math.floor(area / n);
+    const h = Math.min(rowH - 50, 400), w = Math.round(h / 1.5);
+    return c.slice(0, 3).map((s, i) => {
+      const b = j.books[i] || {};
+      return `<div class="abs lrow" style="top:${TOP + i * rowH}px;height:${rowH - 40}px">${coverImg(s, w, h, j.decor)}
+<div class="ltext">${bookLine(b, 130)}${b.note ? `<div class="note" data-fit="${Math.max(rowH - 190, 120)}">${esc(b.note)}</div>` : ''}</div></div>`;
     }).join('');
-    return `<div class="abs" style="top:60px;left:60px;right:140px">${brand(j.logo, j.p, { small: true })}</div>
-<div class="abs col" style="top:200px;left:60px;right:140px">${kickerHtml(j.kicker)}<h1 data-fit="330">${headlineHtml(j.headline, j.highlight)}</h1></div>
-${rows}
-<div class="abs cta" style="top:1560px;left:60px">${ctaHtml(j.cta)}</div>`;
   },
-  // A tilted wall of covers (a bookshelf feel) on top, the message on a colour card below.
-  grid(j, c) {
-    const fill = Array.from({ length: 12 }, (_, i) => c[i % c.length]);
-    const tiles = fill.map(s => `<img class="tile" src="${s}">`).join('');
-    return `<div class="abs gridwall">${tiles}</div>
-<div class="abs fade"></div>
-<div class="abs card col" style="top:860px;left:50px;right:130px;padding:44px 44px 48px">${titleBlock(j, 340)}<div class="row" style="margin-top:22px">${chips(j.points)}</div></div>
-<div class="abs cta" style="top:1585px;left:60px">${ctaHtml(j.cta)}</div>
-<div class="abs" style="top:50px;left:40px;padding:14px 26px;border-radius:28px;background:${j.p.bg2}d9">${brand(j.logo, j.p, { small: true })}</div>`;
+  // One book in focus: a large cover, its title and a longer note below.
+  single(j, c) {
+    const b = j.books[0] || {};
+    return `<div class="abs" style="top:${TOP}px;left:0;right:0;display:flex;justify-content:center">${c[0] ? coverImg(c[0], 400, 600, j.decor) : ''}</div>
+<div class="abs col center" style="top:${TOP + 650}px;left:${INNER.left}px;right:${W - INNER.right}px">${bookLine(b, 110)}${b.note ? `<div class="note" data-fit="150">${esc(b.note)}</div>` : ''}</div>`;
   },
-  // Magazine cover: big masthead, covers overlapping across the middle, headline in boxes at the bottom.
-  magazine(j, c) {
-    const row = c.slice(0, 4).map((s, i, a) => cover(s, coverStyle(300, 60 + i * (700 / Math.max(a.length - 1, 1)), 430 + (i % 2) * 60, i % 2 ? 5 : -5, 2 + i))).join('');
-    return `<div class="abs masthead" style="top:60px;left:60px;right:140px">BookShare<span>KH</span></div>
-<div class="abs" style="top:250px;left:60px;right:140px;display:flex;justify-content:space-between;align-items:center">${kickerHtml(j.kicker)}${j.logo ? `<div class="logo sm"><img src="${j.logo}"></div>` : ''}</div>
-${row}
-<div class="abs col" style="top:1030px;left:60px;right:140px"><h1 class="boxed" data-fit="360">${headlineHtml(j.headline, j.highlight)}</h1>${j.subline ? `<p class="sub" data-fit="120">${esc(j.subline)}</p>` : ''}</div>
-<div class="abs cta" style="top:1590px;left:60px">${ctaHtml(j.cta)}</div>`;
-  },
-  // Everything centred, covers on an arc at the bottom like an open hand of cards.
-  arc(j, c) {
-    const n = Math.min(c.length, 5), span = 44;
-    const cards = c.slice(0, 5).map((s, i) => {
-      const a = n === 1 ? 0 : -span / 2 + (span * i) / (n - 1);
-      return `<img class="book" src="${s}" style="width:260px;height:390px;left:${500 - 130}px;top:1000px;transform-origin:50% 160%;transform:rotate(${a}deg);z-index:${10 - Math.abs(i - (n - 1) / 2)}">`;
-    }).join('');
-    return `<div class="abs" style="top:70px;left:60px;right:140px">${brand(j.logo, j.p, { center: true })}</div>
-<div class="abs col center" style="top:250px;left:60px;right:140px">${titleBlock(j, 400)}</div>
-${cards}
-<div class="abs row" style="top:1470px;left:60px;right:140px;justify-content:center">${chips(j.points)}</div>
-<div class="abs cta" style="top:1575px;left:60px;right:140px;justify-content:center">${ctaHtml(j.cta)}</div>`;
+  // A motivational line in large type; up to 3 small covers below as "read next".
+  quote(j, c) {
+    const covers = c.slice(0, 3);
+    const qBottom = covers.length ? 860 : CARD.bottom - 120;
+    const row = covers.map(s => coverImg(s, 170, 255, j.decor)).join('');
+    return `<div class="abs col center" style="top:${TOP - 20}px;left:${INNER.left}px;right:${W - INNER.right}px;height:${qBottom - TOP}px;justify-content:center">
+<div class="qmark">“</div><div class="quote" data-fit="${qBottom - TOP - 110}">${esc(j.quote || '')}</div></div>
+${covers.length ? `<div class="abs" style="top:${qBottom + 40}px;left:0;right:0;display:flex;justify-content:center;gap:48px">${row}</div>` : ''}`;
   },
 };
 
 export function posterHtml(job) {
-  const p = PALETTES[job.palette] || PALETTES.brand_night;
-  const f = fontOf(job.font, 'noto'), bf = bodyFontOf(job.body_font);
-  const layout = LAYOUT[job.layout] ? job.layout : 'fan';
+  const p = POSTER_PALETTES[job.palette] || POSTER_PALETTES.cream;
+  const f = fontOf(job.font, 'fasthand'), bf = bodyFontOf(job.body_font);
   const covers = (job.covers || []).filter(Boolean);
-  const j = { ...job, p, points: job.points || [], logo: job.logo };
-  j.brandHtml = brand(job.logo, p);
-  const tint = p.light ? `${p.bg1}e6,${p.bg2}f2` : `${p.bg1}d9,${p.bg2}f0`;
-  const bg = job.background ? `linear-gradient(170deg,${tint}),url(${job.background}) center/cover` : `linear-gradient(170deg,${p.bg1} 0%,${p.bg2} 100%)`;
-  const body = covers.length || layout !== 'list' ? LAYOUT[layout](j, covers) : LAYOUT.fan(j, covers);
+  let layout = LAYOUT[job.layout] ? job.layout : 'list';
+  if (layout !== 'quote' && !covers.length) layout = 'quote'; // no cover could be loaded
+  const j = { ...job, books: job.books || [], decor: DECORS.includes(job.decor) ? job.decor : 'none' };
+  if (layout === 'quote' && !j.quote) j.quote = j.books.find(b => b.note)?.note || '';
+  const sig = `<div class="abs sig">${job.logo ? `<img src="${job.logo}">` : ''}<span>BookShare<b>KH</b></span></div>`;
   return `<!doctype html><html lang="km"><head><meta charset="utf-8"><style>
-${fontFaces([job.font, job.body_font, 'kantumruy'])}
+${fontFaces([job.font, job.body_font, 'notoserif', 'fasthand'])}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{width:${W}px;height:${H}px;overflow:hidden}
-body{font-family:'${bf.family}','Noto Sans Khmer','Poppins',sans-serif;color:${p.ink};position:relative;background:${bg}}
-.abs,.deco{position:absolute}
-.col{display:flex;flex-direction:column}.row{display:flex;flex-wrap:wrap;gap:16px}.center{align-items:center;text-align:center}
-.brandbar{display:flex;align-items:center;gap:20px}
-.logo{width:104px;height:104px;border-radius:26px;background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 30px rgba(0,0,0,.25)}
-.logo.sm{width:84px;height:84px;border-radius:22px}.logo img{width:80%;height:80%;object-fit:contain}
-.brand{font-family:'Poppins';font-weight:800;font-size:56px;letter-spacing:-.5px;line-height:1}.brand.sm{font-size:44px}
-.brand span,.masthead span{color:${p.a1}}
-.site{font-family:'Poppins';font-weight:600;font-size:26px;color:${p.light ? p.a2 : p.a2};margin-top:6px}
-.kicker{align-self:flex-start;font-weight:700;font-size:34px;line-height:1.5;color:${p.chipInk};background:${p.a2};border-radius:14px;padding:6px 22px 10px;margin-bottom:22px}
-.center .kicker{align-self:center}
-h1{font-family:'${f.family}','Noto Sans Khmer','Poppins',sans-serif;font-weight:700;font-size:${Math.round(96 * f.scale)}px;line-height:1.5;color:${p.ink};
-  text-shadow:${p.light ? 'none' : '0 4px 24px rgba(0,0,0,.35)'}}
-.hl{color:${p.a1}}
-h1.boxed{line-height:1.75}
-h1.boxed{color:${p.light ? p.ink : '#fff'}}
-h1.boxed .hl{color:${p.chipInk};background:${p.a1};padding:0 14px;border-radius:10px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
-.sub{font-size:40px;line-height:1.6;color:${p.sub};margin-top:16px}
-.book{position:absolute;object-fit:cover;border-radius:14px;border:6px solid #fff;box-shadow:0 26px 60px rgba(0,0,0,.45)}
-.book.hero{border-width:8px;box-shadow:0 36px 80px rgba(0,0,0,.55)}
-.band{background:linear-gradient(90deg,${p.a1},${p.a2});opacity:.9}
-.pt{font-size:32px;font-weight:700;color:${p.chipInk};background:${p.a2};border-radius:40px;padding:8px 28px 12px}
-.cta{display:flex;align-items:center;gap:26px}
-.btn{font-weight:700;font-size:40px;color:#fff;background:${p.a1};border-radius:60px;padding:14px 46px 20px;box-shadow:0 12px 30px ${p.a1}80}
-.url{font-family:'Poppins';font-weight:800;font-size:38px;color:${p.ink}}
-.lrow{position:absolute;left:60px;right:140px;display:flex;align-items:center;gap:26px;background:${p.light ? '#ffffffb3' : '#ffffff14'};border-radius:22px;padding:10px 24px 10px 10px}
-.lrow .thumb{border-width:4px;border-radius:10px;box-shadow:0 10px 24px rgba(0,0,0,.35);flex:none}
-.num{flex:none;width:66px;height:66px;border-radius:50%;background:${p.a1};color:#fff;font-family:'Poppins';font-weight:800;font-size:38px;display:flex;align-items:center;justify-content:center;margin-left:8px}
-.ltext{flex:1;min-width:0;overflow:hidden}.ltitle{font-family:'Poppins','Noto Sans Khmer';font-weight:600;font-size:34px;line-height:1.25}
-.lnote{font-size:29px;line-height:1.5;color:${p.sub};margin-top:6px}
-.gridwall{top:-120px;left:-160px;width:1400px;height:1150px;display:grid;grid-template-columns:repeat(4,1fr);gap:26px;transform:rotate(-9deg)}
-.tile{width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:12px;box-shadow:0 16px 36px rgba(0,0,0,.4)}
-.fade{top:640px;left:0;width:${W}px;height:400px;background:linear-gradient(180deg,transparent,${p.bg2})}
-.card{background:${p.light ? '#fffffff0' : `${p.bg2}f0`};border-radius:36px;box-shadow:0 30px 70px rgba(0,0,0,.35);border-top:10px solid ${p.a1}}
-.masthead{font-family:'Poppins';font-weight:800;font-size:150px;letter-spacing:-6px;line-height:1;color:${p.ink}}
+body{font-family:'${bf.family}','Noto Sans Khmer',sans-serif;color:${p.ink};position:relative;background:${p.outer}}
+.abs{position:absolute}.col{display:flex;flex-direction:column}.center{align-items:center;text-align:center}
+.card{top:${CARD.top}px;left:${CARD.left}px;width:${CARD.right - CARD.left}px;height:${CARD.bottom - CARD.top}px;background:${p.card}}
+h1{position:absolute;top:${CARD.top + 70}px;left:${INNER.left}px;right:${W - INNER.right}px;height:170px;display:flex;align-items:center;justify-content:center;text-align:center;
+  font-family:'${f.family}','Noto Sans Khmer',sans-serif;font-weight:400;font-size:${Math.round(84 * f.scale)}px;line-height:1.45;color:${p.ink}}
+.lrow{left:${INNER.left - 10}px;right:${W - INNER.right}px;display:flex;align-items:center;gap:56px}
+.cv{position:relative;flex:none}
+.cv img{width:100%;height:100%;object-fit:cover;display:block;box-shadow:0 10px 26px rgba(0,0,0,${p.dark ? '.5' : '.22'}),0 2px 6px rgba(0,0,0,.12)}
+.tape{position:absolute;top:-18px;width:110px;height:36px;background:${p.a2};opacity:.85;transform:rotate(-4deg)}
+.ltext{flex:1;min-width:0}
+.btitle{font-family:'Noto Serif Khmer','Hanuman',Georgia,'DejaVu Serif',serif;font-weight:700;font-size:42px;line-height:1.3;color:${p.ink};overflow:hidden}
+.by{font-weight:600}
+.note{font-size:38px;line-height:1.7;color:${p.sub};margin-top:14px;overflow:hidden}
+.center .note{font-size:36px}
+.qmark{font-family:Georgia,'DejaVu Serif',serif;font-size:170px;line-height:.8;height:96px;color:${p.a1};opacity:.85}
+.quote{font-family:'${f.family}','Noto Sans Khmer',sans-serif;font-size:${Math.round(66 * f.scale)}px;line-height:1.65;color:${p.ink};overflow:hidden;width:100%}
+.sig{right:${W - CARD.right + 6}px;bottom:14px;display:flex;align-items:center;gap:10px;opacity:.6;font-family:'Poppins';font-weight:600;font-size:24px;color:${p.dark ? '#ffffff' : p.ink}}
+.sig img{width:34px;height:34px;object-fit:contain;border-radius:8px;background:#fff;padding:3px}
+.sig b{color:${p.a1};font-weight:800}
 </style></head><body>
-${decorHtml(job.decor, p)}
-${body}
+<div class="abs card"></div>
+${decorHtml(j.decor, p)}
+<h1 data-fit="170">${esc(job.heading || '')}</h1>
+${LAYOUT[layout](j, covers)}
+${sig}
 ${FIT_SCRIPT}
 </body></html>`;
 }
@@ -227,18 +172,17 @@ ${FIT_SCRIPT}
 export async function renderPoster(job, outFile) {
   const work = join(dirname(outFile), 'poster-work');
   mkdirSync(work, { recursive: true });
-  // Book list rows stay with their cover: a row whose cover could not be loaded is dropped with it.
+  // Each book stays with its cover: a book whose cover could not be loaded is dropped with it.
   const covers = [], books = [];
-  for (const [i, url] of (job.covers || []).slice(0, 5).entries()) {
+  for (const [i, url] of (job.covers || []).slice(0, 3).entries()) {
     const d = await dataUri(url);
     if (d) { covers.push(d); books.push(job.books?.[i] || {}); }
   }
   const logo = await dataUri(job.logo_url || 'https://booksharekh.com/dist/img/logo/logo.png', 4 * 1024 * 1024);
-  const background = await dataUri(job.background_url); // a website photo behind everything, tinted in the palette
   const html = join(work, 'poster.html');
-  writeFileSync(html, posterHtml({ ...job, covers, logo, background, books }), 'utf8');
+  writeFileSync(html, posterHtml({ ...job, covers, logo, books }), 'utf8');
   screenshot(html, outFile, W, H);
-  return { file: outFile, covers: covers.length, logo: Boolean(logo), background: Boolean(background), layout: job.layout || 'fan' };
+  return { file: outFile, covers: covers.length, logo: Boolean(logo), layout: job.layout || 'list' };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

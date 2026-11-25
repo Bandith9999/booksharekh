@@ -32,9 +32,10 @@ const job = {
   ],
 };
 
-for (const [name, voice] of [['voiced', true], ['silent', false]]) {
+// Every visual style renders (the AI picks one per video); the voiced one is the original card style.
+for (const [name, voice, style] of [['voiced', true, 'card'], ['silent', false, 'cinematic'], ['minimal', false, 'minimal'], ['spotlight', false, 'spotlight']]) {
   const file = join(out, `promo-${name}.mp4`);
-  const res = await renderPromo(job, file, { voice });
+  const res = await renderPromo({ ...job, style, kind: style === 'card' ? 'website' : 'education' }, file, { voice });
   const info = probe(file);
   const v = info.streams.find(s => s.codec_type === 'video');
   const dur = Number(info.format.duration);
