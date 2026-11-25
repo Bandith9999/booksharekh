@@ -17,7 +17,13 @@ export function makeD1() {
     db, failOn: null, // set to a RegExp to simulate D1 errors for matching SQL
     prepare(sql) {
       let args = [];
-      const guard = () => { if (d1.failOn?.test(sql)) throw new Error('D1_ERROR: simulated outage'); };
+      const guard = () => {
+        if (d1.failOn?.test(sql)) throw new Error('D1_ERROR: simulated outage');
+        // Real D1 rejects LIKE/GLOB patterns over 50 characters ("pattern too complex"); node:sqlite does not.
+        if (/\b(LIKE|GLOB)\b/i.test(sql) && args.some(a => typeof a === 'string' && /[%*]/.test(a) && a.length > 50)) {
+          throw new Error('D1_ERROR: LIKE or GLOB pattern too complex: SQLITE_ERROR');
+        }
+      };
       const stmt = {
         bind(...a) { args = a.map(v => (v === undefined ? null : v)); return stmt; },
         async run() { guard(); const r = db.prepare(sql).run(...args); return { success: true, meta: { changes: Number(r.changes) } }; },
