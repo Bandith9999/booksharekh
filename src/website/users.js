@@ -16,11 +16,24 @@ const setSetting = (env, key, value) => env.DB.prepare(`INSERT INTO settings (ke
 const VALID_TIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 const fmt = n => Number(n || 0).toLocaleString('en-US');
 
-// New members (owner request): "🆕 email · user name", one per line, at most 10.
+// The site stores a country name, or "Unknown" / nothing when it could not tell.
+const countryOf = r => {
+  const c = String(r.country || '').trim();
+  return c && !/^unknown$/i.test(c) ? `🌍 ${clamp(c, 40)}` : '';
+};
+
+// New members (owner request), a block each, at most 10, blank line between:
+//   🆕 email
+//   Username: name
+//   🌍 country
+// No email -> the username goes on the 🆕 line; unknown country -> no 🌍 line.
 export function members(rows = []) {
-  const list = rows.slice(0, MAX_NAMES).map(r => `🆕 ${[r.email ? clamp(r.email, 80) : '', clamp(r.user || '?', 40)].filter(Boolean).join(' · ')}`);
+  const list = rows.slice(0, MAX_NAMES).map(r => {
+    const name = `Username: ${clamp(r.user || '?', 40)}`;
+    return (r.email ? [`🆕 ${clamp(r.email, 80)}`, name] : [`🆕 ${name}`]).concat(countryOf(r) || []).join('\n');
+  });
   if (rows.length > MAX_NAMES) list.push(`+${rows.length - MAX_NAMES}`);
-  return list.join('\n');
+  return list.join('\n\n');
 }
 
 // Cron: the first run only records the start time (no flood of old activity).

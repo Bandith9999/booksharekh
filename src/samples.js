@@ -12,7 +12,7 @@ export function sampleAlerts(env) {
   const km = isKhmer(env);
   const t = { id: 123, user: 'Lyly.Hong', amount: '10.00', currency: 'USD', method: 'khqr', transaction_id: 'TX20261122001', notes: 'ABA', has_image: true };
   const tb = T.topupButtons(env), rb = T.requestButtons(env), ab = T.buttons(env);
-  const reg = [{ user: 'Lyly.Hong', email: 'lyly@example.com' }, { user: 'Sok.Dara', email: 'sokdara@example.com' }];
+  const reg = [{ user: 'Lyly.Hong', email: 'lyly@example.com', country: 'Cambodia' }, { user: 'Sok.Dara', email: 'sokdara@example.com', country: 'Thailand' }];
   const task = { id: 'BSK-00000000-0000-4000-8000-000000000000', task_type: 'website_code_change' };
   const plan = renderPlan({ summary: km ? 'ប្តូរអក្សរ "New Releases" ទៅជា "សៀវភៅថ្មីៗ"' : 'Rename "New Releases" to Khmer', steps: [{ agent: 'laravel_developer', objective: km ? 'កែ Blade template' : 'Edit the Blade template' }], risks: [], needs_rights_verification: false }, { provider: 'anthropic', model: 'claude-sonnet-5-5' }, env);
   return [
