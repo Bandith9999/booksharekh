@@ -53,7 +53,9 @@ export async function trackMessage(env, taskId, sent) {
 export async function clearTrail(env, taskId) {
   if (!taskId) return;
   try {
-    const rows = (await env.DB.prepare('SELECT key FROM settings WHERE key LIKE ?').bind(`${trailPrefix(taskId)}%`).all()).results || [];
+    // Prefix match without LIKE: D1 rejects LIKE patterns over 50 characters, and this prefix is longer.
+    const prefix = trailPrefix(taskId);
+    const rows = (await env.DB.prepare('SELECT key FROM settings WHERE substr(key, 1, ?) = ?').bind(prefix.length, prefix).all()).results || [];
     const byChat = new Map();
     for (const { key } of rows) {
       const [chat, id] = key.slice(trailPrefix(taskId).length).split(':').map(Number);
@@ -62,7 +64,7 @@ export async function clearTrail(env, taskId) {
     for (const [chat_id, ids] of byChat) {
       for (let i = 0; i < ids.length; i += 100) await tg(env, 'deleteMessages', { chat_id, message_ids: ids.slice(i, i + 100) }).catch(() => {});
     }
-    await env.DB.prepare('DELETE FROM settings WHERE key LIKE ?').bind(`${trailPrefix(taskId)}%`).run();
+    await env.DB.prepare('DELETE FROM settings WHERE substr(key, 1, ?) = ?').bind(prefix.length, prefix).run();
     // Remember when the result was sent (see dropIfFinished); old marks are pruned.
     await env.DB.prepare(`INSERT INTO settings (key,value,updated_at) VALUES (?, 'final', CURRENT_TIMESTAMP)
         ON CONFLICT(key) DO UPDATE SET updated_at=CURRENT_TIMESTAMP`).bind(`${FINAL}${taskId}`).run();

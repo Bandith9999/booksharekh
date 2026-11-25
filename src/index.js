@@ -198,7 +198,9 @@ async function finishJob(request, env) {
   }
   if (MEDIA_OUT[row.task_type]) {
     // Report success only if the file really arrived (an outdated runner on main would send none).
-    const got = await env.DB.prepare("SELECT COUNT(*) n FROM settings WHERE key LIKE ?").bind(`promo_sent:${data.task_id}:%`).first();
+    // Prefix match without LIKE: D1 rejects LIKE patterns over 50 characters.
+    const sentPrefix = `promo_sent:${data.task_id}:`;
+    const got = await env.DB.prepare('SELECT COUNT(*) n FROM settings WHERE substr(key, 1, ?) = ?').bind(sentPrefix.length, sentPrefix).first();
     const ok = state === 'completed' && got.n > 0;
     const done = row.task_type === 'poster' ? T.posterDone : T.promoDone;
     await tell(env, data.task_id, row, done(env, ok, ok ? '' : state === 'completed'
