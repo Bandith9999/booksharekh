@@ -35,8 +35,8 @@ function promoScripts({ theme = '', kind, candidate_ids = [] }) {
 
 // Content Creator poster text (demo).
 const posterText = ({ candidate_ids = [] } = {}) => ({ cover_ids: candidate_ids.slice(0, 2), kind: 'books',
-  title: 'Poster [DEMO]', design: { layout: 'showcase', palette: 'cream', font: 'moul', decor: 'glow' },
-  heading: 'ស្នេហា និងទំនាក់ទំនង',
+  title: 'Poster [DEMO]', design: { layout: 'showcase', palette: 'cream', decor: 'glow' },
+  heading: 'Books on Love',
   caption: '[DEMO] តើអ្នកនឹងអានសៀវភៅមួយណាមុន?\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#សៀវភៅ', '#Reading'],
 });
 

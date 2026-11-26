@@ -208,7 +208,7 @@ test('/poster: book recommendation poster → approve → PNG file + caption in 
   assert.equal(lastText(calls), '🖼 កំពុងសរសេរអត្ថបទ poster…');
   await drain(e);
   const approval = sent(calls).at(-1);
-  assert.equal(approval.text, '🖼 Poster [DEMO]\n🎨 📚 books · showcase · cream · moul · glow\n「ស្នេហា និងទំនាក់ទំនង」\n1. Emma by Jane Austen\n2. Dracula by Bram Stoker\n\n🔎 QA (mock): ✅ ល្អ\n\n👉 បង្កើត poster?');
+  assert.equal(approval.text, '🖼 Poster [DEMO]\n🎨 📚 books · showcase · cream · glow\n「Books on Love」\n1. Emma by Jane Austen\n2. Dracula by Bram Stoker\n\n🔎 QA (mock): ✅ ល្អ\n\n👉 បង្កើត poster?');
   const task = latestTask(e);
   // The first theme in rotation is books, not the website: the AI gets no price facts.
   const posterStep = e.DB.db.prepare("SELECT input FROM agent_tasks WHERE task_id=? AND action='write_poster'").get(task.id).input;
@@ -233,8 +233,8 @@ test('/poster: book recommendation poster → approve → PNG file + caption in 
   assert.equal((await runner(6)).status, 409, 'a runner without the E-Library renderer gets nothing');
   const got = await (await runner(7)).json();
   // Textless image: only the heading and the covers go to the renderer.
-  assert.deepEqual(got.posters[0], { layout: 'showcase', palette: 'cream', font: 'moul', decor: 'glow',
-    heading: 'ស្នេហា និងទំនាក់ទំនង', covers: [`${SITE}/covers/1.jpg`, `${SITE}/covers/2.jpg`], logo_url: null });
+  assert.deepEqual(got.posters[0], { layout: 'showcase', palette: 'cream', decor: 'glow',
+    heading: 'Books on Love', covers: [`${SITE}/covers/1.jpg`, `${SITE}/covers/2.jpg`], logo_url: null });
 
   const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
   const up = (path) => worker.fetch(new Request(`https://w.example${path}`, { method: 'POST', headers: { Authorization: 'Bearer cb-secret', 'content-type': 'image/png' }, body: png }), e);
@@ -250,7 +250,7 @@ test('/poster: book recommendation poster → approve → PNG file + caption in 
 
 test('QA by Gemini: issues are shown in the approval; if Gemini is not set up, QA is skipped and the approval still comes', async () => {
   // Real routing: Claude writes, Gemini reviews. No GEMINI_API_KEY → QA skipped, never blocks.
-  const claudePoster = { title: 'Poster', kind: 'books', design: { layout: 'showcase', palette: 'blush', font: 'dangrek', decor: 'shelf' }, cover_ids: [2, 3, 1], heading: 'អានសៀវភៅ', caption: 'x\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#a', '#b'] };
+  const claudePoster = { title: 'Poster', kind: 'books', design: { layout: 'showcase', palette: 'blush', decor: 'shelf' }, cover_ids: [2, 3, 1], heading: 'Read More', caption: 'x\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#a', '#b'] };
   const anthropic = [/api\.anthropic\.com\/v1\/messages$/, () => Response.json({ model: 'claude-sonnet-5-5', stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 10 }, content: [{ type: 'text', text: JSON.stringify(claudePoster) }] })];
   const base = { AI_PAID_ENABLED: 'true', AI_PROVIDER: 'anthropic', AI_MODEL: 'claude-sonnet-5-5', ANTHROPIC_API_KEY: 'sk-ant-x', AI_REVIEW_PROVIDER: 'google', AI_REVIEW_MODEL: 'gemini-3.8-flash' };
 
@@ -271,7 +271,7 @@ test('QA by Gemini: issues are shown in the approval; if Gemini is not set up, Q
   await drain(withKey);
   const g = c2.find(c => /generativelanguage/.test(c.url));
   assert.ok(g, 'Gemini was asked');
-  assert.match(JSON.stringify(g.body), /អានសៀវភៅ/, 'Gemini reviewed the poster text');
+  assert.match(JSON.stringify(g.body), /Read More/, 'Gemini reviewed the poster text');
   assert.match(sent(c2).at(-1).text, /🔎 QA \(Gemini\): ⚠️ គួរកែ:\n• ពាក្យ "ចូលមើល" គួរថា "ចូលមើលឥឡូវនេះ"\n\n👉 បង្កើត poster\?$/);
 });
 

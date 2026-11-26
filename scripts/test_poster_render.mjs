@@ -18,8 +18,8 @@ for (const layout of ['showcase', 'hero', 'phone']) assert.equal((posterHtml({ l
 
 const file = join(out, 'poster.png');
 const res = await renderPoster({
-  layout: 'showcase', palette: 'lavender', font: 'moul', decor: 'glow',
-  heading: 'សម្រាប់ថ្ងៃដែលអ្នកអស់កម្លាំង',
+  layout: 'showcase', palette: 'lavender', decor: 'glow',
+  heading: 'For the Tired Days',
   covers: [], logo_url: 'https://booksharekh.com/dist/img/logo/logo.png',
 }, file);
 const info = JSON.parse(spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height,codec_name', '-of', 'json', file], { encoding: 'utf8' }).stdout).streams[0];
