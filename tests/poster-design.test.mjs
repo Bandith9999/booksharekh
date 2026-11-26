@@ -12,11 +12,11 @@ test('topic keywords: filler words dropped, plurals trimmed', () => {
   assert.deepEqual(topicKeywords('poster'), []);
 });
 
-test('designs: valid, never the same palette or font as the last poster; the layout follows the content', () => {
-  const last = { layout: 'showcase', palette: 'cream', font: 'moul', decor: 'glow' };
-  const d = pickDesign({ layout: 'showcase', palette: 'cream', font: 'moul', decor: 'shelf' }, [last]);
+test('designs: valid, never the same palette as the last poster; the layout follows the content', () => {
+  const last = { layout: 'showcase', palette: 'cream', decor: 'glow' };
+  const d = pickDesign({ layout: 'showcase', palette: 'cream', decor: 'shelf' }, [last]);
   assert.equal(d.layout, 'showcase', 'a showcase may follow a showcase');
-  assert.notEqual(d.palette, 'cream'); assert.notEqual(d.font, 'moul');
+  assert.notEqual(d.palette, 'cream');
   for (const k of Object.keys(POSTER_DESIGN)) assert.ok(POSTER_DESIGN[k].includes(d[k]), k);
   assert.equal(pickDesign({ layout: 'nope', palette: 'x' }, [], { kind: 'website' }).layout, 'phone');
   assert.equal(pickDesign({ layout: 'nope' }, [], { kind: 'books' }).layout, 'showcase');
@@ -26,7 +26,14 @@ test('E-Library poster: soft palettes only, no text fields besides the heading',
   const { POSTER_SCHEMA, posterJob } = await import('../src/marketing/poster.js');
   assert.ok(!POSTER_DESIGN.palette.includes('night'), 'no dark palette: covers must be clearly visible');
   assert.ok(!('quote' in POSTER_SCHEMA.properties) && !('book_notes' in POSTER_SCHEMA.properties));
-  assert.deepEqual(Object.keys(posterJob({ heading: 'x', covers: ['a'] })).sort(), ['covers', 'decor', 'font', 'heading', 'layout', 'logo_url', 'palette']);
+  assert.deepEqual(Object.keys(posterJob({ heading: 'x', covers: ['a'] })).sort(), ['covers', 'decor', 'heading', 'layout', 'logo_url', 'palette']);
+});
+
+test('no Khmer text on the poster image: a Khmer heading is dropped, an English one is kept', async () => {
+  const { posterHeading } = await import('../src/marketing/poster.js');
+  assert.equal(posterHeading('Your Library'), 'Your Library');
+  assert.equal(posterHeading('បណ្ណាល័យក្នុងដៃអ្នក'), '');
+  assert.equal(posterHeading('Books on ស្នេហា'), '', 'mixed text is dropped too');
 });
 
 test('no price talk outside website posters; the website comes up only 1 time in 10', async () => {

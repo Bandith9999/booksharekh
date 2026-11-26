@@ -1,18 +1,19 @@
 // Renders one BookShareKH poster as a 4:5 portrait post (1080x1350). HTML → PNG with headless Chrome.
 // Style (owner request 2026-11-26): a promotional "E-Library" image that is almost textless. The book
 // covers are the hero, shown large on a soft pastel background (light gradient with a soft glow, a shelf,
-// or a phone screen like an e-reader) so every cover is clearly visible. The only text is one short Khmer
-// heading in a Khmer font and a small BookShareKH signature: no titles, notes, prices, buttons or web
-// address (the caption carries the words). The Content Creator AI picks the layout, palette, font and decor.
+// or a phone screen like an e-reader) so every cover is clearly visible. No Khmer text on the image
+// (owner request 2026-11-26): the only text is one short English heading and a small BookShareKH
+// signature; no titles, notes, prices, buttons or web address (the Khmer caption carries the words).
+// The Content Creator AI picks the layout, palette and decor.
 //   node scripts/poster_render.mjs <job.json> <out.png>
-// job: { layout, palette, font, decor, heading, covers: [https urls], logo_url }
-// The heading shrinks to fit its box (any font).
+// job: { layout, palette, decor, heading, covers: [https urls], logo_url }
+// The heading shrinks to fit its box.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { fetchImage } from './fetch_image.mjs';
-import { KHMER_FONTS, fontFaces, fontOf } from './khmer_fonts.mjs';
+import { fontFaces } from './khmer_fonts.mjs';
 
 export const W = 1080, H = 1350;
 
@@ -72,7 +73,6 @@ export const POSTER_PALETTES = {
 };
 export const LAYOUTS = ['showcase', 'hero', 'phone'];
 export const DECORS = ['glow', 'shelf', 'bokeh', 'none'];
-export const FONTS_KM = KHMER_FONTS; // heading fonts: scripts/khmer_fonts.mjs
 
 // Through the AI Manager on the GitHub runner (the site's firewall blocks GitHub servers).
 async function dataUri(url, maxBytes = 8 * 1024 * 1024) {
@@ -80,7 +80,7 @@ async function dataUri(url, maxBytes = 8 * 1024 * 1024) {
   return img ? `data:${img.type};base64,${img.bytes.toString('base64')}` : null;
 }
 
-const HEAD = { top: 70, height: 230 }; // the Khmer heading
+const HEAD = { top: 70, height: 230 }; // the English heading
 const STAGE_TOP = 330; // the covers start here
 const CX = W / 2;
 
@@ -130,7 +130,6 @@ const LAYOUT = {
 
 export function posterHtml(job) {
   const p = POSTER_PALETTES[job.palette] || POSTER_PALETTES.cream;
-  const f = fontOf(job.font, 'kantumruy');
   const covers = (job.covers || []).filter(Boolean);
   const layout = LAYOUT[job.layout] ? job.layout : 'showcase';
   const decor = DECORS.includes(job.decor) ? job.decor : 'glow';
@@ -139,13 +138,13 @@ export function posterHtml(job) {
   const headBox = covers.length ? { top: HEAD.top, height: HEAD.height } : { top: H / 2 - 260, height: 520 };
   const sig = `<div class="abs sig">${job.logo ? `<img src="${job.logo}">` : ''}<span>BookShare<b>KH</b></span></div>`;
   return `<!doctype html><html lang="km"><head><meta charset="utf-8"><style>
-${fontFaces([job.font])}
+${fontFaces()}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{width:${W}px;height:${H}px;overflow:hidden}
-body{font-family:'Noto Sans Khmer',sans-serif;color:${p.ink};position:relative;background:linear-gradient(170deg,${p.bg1} 0%,${p.bg1} 30%,${p.bg2} 100%)}
+body{font-family:'Poppins',sans-serif;color:${p.ink};position:relative;background:linear-gradient(170deg,${p.bg1} 0%,${p.bg1} 30%,${p.bg2} 100%)}
 .abs{position:absolute}
 h1{position:absolute;left:90px;right:90px;top:${headBox.top}px;height:${headBox.height}px;display:flex;align-items:center;justify-content:center;text-align:center;z-index:5;
-  font-family:'${f.family}','Noto Sans Khmer',sans-serif;font-weight:400;font-size:${Math.round((covers.length ? 80 : 96) * f.scale)}px;line-height:1.5;color:${p.ink}}
+  font-family:'Poppins',sans-serif;font-weight:600;font-size:${covers.length ? 78 : 96}px;line-height:1.2;letter-spacing:-.5px;color:${p.ink}}
 .cv img.main{width:100%;height:100%;object-fit:cover;display:block;border-radius:6px;box-shadow:0 30px 50px rgba(40,30,20,.22),0 8px 16px rgba(40,30,20,.14)}
 .cv img.refl{position:absolute;left:0;top:100%;margin-top:6px;width:100%;height:100%;object-fit:cover;border-radius:6px;transform:scaleY(-1);opacity:.18;
   -webkit-mask-image:linear-gradient(to top,#000 0%,transparent 20%);mask-image:linear-gradient(to top,#000 0%,transparent 20%)}
