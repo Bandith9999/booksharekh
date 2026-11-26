@@ -63,9 +63,9 @@ async function getJob(env, id, request) {
       font: v.design?.font || 'kantumruy', body_font: v.design?.body_font || 'kantumruy', palette: v.design?.palette || 'brand_night',
       background_url: v.background?.url || null, logo_url: v.logo_url || null })) });
   }
-  // Poster jobs get the approved poster text and design; they need the runner with the editorial 4:5 renderer (v6).
+  // Poster jobs get the approved heading, covers and design; they need the runner with the E-Library renderer (v7).
   if (job.task_type === 'poster') {
-    if (Number(request.headers.get('X-Runner-Version') || 0) < 6) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
+    if (Number(request.headers.get('X-Runner-Version') || 0) < 7) return json({ error: 'runner out of date: merge the latest code into main' }, 409);
     const p = await posterOf(env, id);
     return json({ ...job, posters: (p?.posters || []).slice(0, 1).map(posterJob) });
   }
