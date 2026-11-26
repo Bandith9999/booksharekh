@@ -208,7 +208,7 @@ test('/poster: book recommendation poster → approve → PNG file + caption in 
   assert.equal(lastText(calls), '🖼 កំពុងសរសេរអត្ថបទ poster…');
   await drain(e);
   const approval = sent(calls).at(-1);
-  assert.equal(approval.text, '🖼 Poster [DEMO]\n🎨 📚 books · list · cream · fasthand · none\n「ស្នេហា និងទំនាក់ទំនង」\n1. Emma by Jane Austen\n   រឿងស្នេហាដ៏ស្រទន់ ពោរពេញដោយអារម្មណ៍\n2. Dracula by Bram Stoker\n   រឿងដែលធ្វើឲ្យអ្នកគិតយូរ\n\n🔎 QA (mock): ✅ ល្អ\n\n👉 បង្កើត poster?');
+  assert.equal(approval.text, '🖼 Poster [DEMO]\n🎨 📚 books · showcase · cream · moul · glow\n「ស្នេហា និងទំនាក់ទំនង」\n1. Emma by Jane Austen\n2. Dracula by Bram Stoker\n\n🔎 QA (mock): ✅ ល្អ\n\n👉 បង្កើត poster?');
   const task = latestTask(e);
   // The first theme in rotation is books, not the website: the AI gets no price facts.
   const posterStep = e.DB.db.prepare("SELECT input FROM agent_tasks WHERE task_id=? AND action='write_poster'").get(task.id).input;
@@ -230,11 +230,11 @@ test('/poster: book recommendation poster → approve → PNG file + caption in 
   await telegram(e, press(approveData));
   await drain(e);
   const runner = v => worker.fetch(new Request(`https://w.example/job/${task.id}`, { headers: { Authorization: 'Bearer cb-secret', 'X-Runner-Version': String(v) } }), e);
-  assert.equal((await runner(5)).status, 409, 'a runner without the editorial renderer gets nothing');
-  const got = await (await runner(6)).json();
-  assert.deepEqual(got.posters[0], { layout: 'list', palette: 'cream', font: 'fasthand', body_font: 'kantumruy', decor: 'none',
-    heading: 'ស្នេហា និងទំនាក់ទំនង', quote: '', covers: [`${SITE}/covers/1.jpg`, `${SITE}/covers/2.jpg`],
-    books: [{ title: 'Emma', author: 'Jane Austen', note: 'រឿងស្នេហាដ៏ស្រទន់ ពោរពេញដោយអារម្មណ៍' }, { title: 'Dracula', author: 'Bram Stoker', note: 'រឿងដែលធ្វើឲ្យអ្នកគិតយូរ' }], logo_url: null });
+  assert.equal((await runner(6)).status, 409, 'a runner without the E-Library renderer gets nothing');
+  const got = await (await runner(7)).json();
+  // Textless image: only the heading and the covers go to the renderer.
+  assert.deepEqual(got.posters[0], { layout: 'showcase', palette: 'cream', font: 'moul', decor: 'glow',
+    heading: 'ស្នេហា និងទំនាក់ទំនង', covers: [`${SITE}/covers/1.jpg`, `${SITE}/covers/2.jpg`], logo_url: null });
 
   const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
   const up = (path) => worker.fetch(new Request(`https://w.example${path}`, { method: 'POST', headers: { Authorization: 'Bearer cb-secret', 'content-type': 'image/png' }, body: png }), e);
@@ -250,7 +250,7 @@ test('/poster: book recommendation poster → approve → PNG file + caption in 
 
 test('QA by Gemini: issues are shown in the approval; if Gemini is not set up, QA is skipped and the approval still comes', async () => {
   // Real routing: Claude writes, Gemini reviews. No GEMINI_API_KEY → QA skipped, never blocks.
-  const claudePoster = { title: 'Poster', kind: 'books', design: { layout: 'list', palette: 'blush', font: 'dangrek', body_font: 'battambang', decor: 'tape' }, cover_ids: [2, 3, 1], heading: 'អានសៀវភៅ', quote: '', book_notes: ['a', 'b', 'c'], caption: 'x\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#a', '#b'] };
+  const claudePoster = { title: 'Poster', kind: 'books', design: { layout: 'showcase', palette: 'blush', font: 'dangrek', decor: 'shelf' }, cover_ids: [2, 3, 1], heading: 'អានសៀវភៅ', caption: 'x\n📖 booksharekh.com', hashtags: ['#BookShareKH', '#a', '#b'] };
   const anthropic = [/api\.anthropic\.com\/v1\/messages$/, () => Response.json({ model: 'claude-sonnet-5-5', stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 10 }, content: [{ type: 'text', text: JSON.stringify(claudePoster) }] })];
   const base = { AI_PAID_ENABLED: 'true', AI_PROVIDER: 'anthropic', AI_MODEL: 'claude-sonnet-5-5', ANTHROPIC_API_KEY: 'sk-ant-x', AI_REVIEW_PROVIDER: 'google', AI_REVIEW_MODEL: 'gemini-3.8-flash' };
 

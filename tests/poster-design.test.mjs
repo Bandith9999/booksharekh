@@ -13,13 +13,20 @@ test('topic keywords: filler words dropped, plurals trimmed', () => {
 });
 
 test('designs: valid, never the same palette or font as the last poster; the layout follows the content', () => {
-  const last = { layout: 'list', palette: 'cream', font: 'fasthand', decor: 'none' };
-  const d = pickDesign({ layout: 'list', palette: 'cream', font: 'fasthand', decor: 'tape' }, [last]);
-  assert.equal(d.layout, 'list', 'a list of books may follow a list of books');
-  assert.notEqual(d.palette, 'cream'); assert.notEqual(d.font, 'fasthand');
+  const last = { layout: 'showcase', palette: 'cream', font: 'moul', decor: 'glow' };
+  const d = pickDesign({ layout: 'showcase', palette: 'cream', font: 'moul', decor: 'shelf' }, [last]);
+  assert.equal(d.layout, 'showcase', 'a showcase may follow a showcase');
+  assert.notEqual(d.palette, 'cream'); assert.notEqual(d.font, 'moul');
   for (const k of Object.keys(POSTER_DESIGN)) assert.ok(POSTER_DESIGN[k].includes(d[k]), k);
-  assert.equal(pickDesign({ layout: 'nope', palette: 'x' }, [], { kind: 'motivation' }).layout, 'quote');
-  assert.equal(pickDesign({ layout: 'nope' }, [], { kind: 'books' }).layout, 'list');
+  assert.equal(pickDesign({ layout: 'nope', palette: 'x' }, [], { kind: 'website' }).layout, 'phone');
+  assert.equal(pickDesign({ layout: 'nope' }, [], { kind: 'books' }).layout, 'showcase');
+});
+
+test('E-Library poster: soft palettes only, no text fields besides the heading', async () => {
+  const { POSTER_SCHEMA, posterJob } = await import('../src/marketing/poster.js');
+  assert.ok(!POSTER_DESIGN.palette.includes('night'), 'no dark palette: covers must be clearly visible');
+  assert.ok(!('quote' in POSTER_SCHEMA.properties) && !('book_notes' in POSTER_SCHEMA.properties));
+  assert.deepEqual(Object.keys(posterJob({ heading: 'x', covers: ['a'] })).sort(), ['covers', 'decor', 'font', 'heading', 'layout', 'logo_url', 'palette']);
 });
 
 test('no price talk outside website posters; the website comes up only 1 time in 10', async () => {

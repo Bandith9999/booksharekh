@@ -1,18 +1,18 @@
 // Renders one BookShareKH poster as a 4:5 portrait post (1080x1350). HTML → PNG with headless Chrome.
-// Style (owner request 2026-11-25): a calm, editorial "book recommendation" card like bookstagram posts:
-// a paper-coloured card, a hand-lettered heading, book covers with "Title by Author" and a short Khmer
-// note about each book. No button and no website address on the image; only a small BookShareKH
-// signature in the corner. The Content Creator AI picks the layout, palette, fonts and decoration.
+// Style (owner request 2026-11-26): a promotional "E-Library" image that is almost textless. The book
+// covers are the hero, shown large on a soft pastel background (light gradient with a soft glow, a shelf,
+// or a phone screen like an e-reader) so every cover is clearly visible. The only text is one short Khmer
+// heading in a Khmer font and a small BookShareKH signature: no titles, notes, prices, buttons or web
+// address (the caption carries the words). The Content Creator AI picks the layout, palette, font and decor.
 //   node scripts/poster_render.mjs <job.json> <out.png>
-// job: { layout, palette, font, body_font, decor, heading, quote, covers: [https urls],
-//        books: [{ title, author, note }], logo_url }
-// Text shrinks to fit its box (any font).
+// job: { layout, palette, font, decor, heading, covers: [https urls], logo_url }
+// The heading shrinks to fit its box (any font).
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { fetchImage } from './fetch_image.mjs';
-import { KHMER_FONTS, bodyFontOf, fontFaces, fontOf } from './khmer_fonts.mjs';
+import { KHMER_FONTS, fontFaces, fontOf } from './khmer_fonts.mjs';
 
 export const W = 1080, H = 1350;
 
@@ -59,18 +59,19 @@ export const PALETTES = {
 };
 
 // ---------- poster design choices (keep in sync with POSTER_DESIGN in src/marketing/poster.js) ----------
-// outer: page colour, card: the inner card, ink: headings, sub: notes, a1: accent, a2: soft accent.
+// Soft pastels so the covers stand out. bg1 → bg2: background gradient, ink: heading, a1: soft accent
+// (glow, bokeh), a2: shelf / phone rim.
 export const POSTER_PALETTES = {
-  cream: { outer: '#fbf6ee', card: '#f3ebdd', ink: '#1c1a17', sub: '#2f2b26', a1: '#c96f53', a2: '#e8c9a0' },
-  sage: { outer: '#f1f4ed', card: '#e1e8da', ink: '#1f2a1f', sub: '#33402f', a1: '#5f7f5a', a2: '#c9d8b6' },
-  blush: { outer: '#fcf1ef', card: '#f5dfdb', ink: '#2b1d1f', sub: '#43302f', a1: '#c8566b', a2: '#f0bcc4' },
-  sky: { outer: '#f0f5f9', card: '#dde9f1', ink: '#14263a', sub: '#2c3f52', a1: '#3d6fa3', a2: '#b9d3e8' },
-  lavender: { outer: '#f5f2f9', card: '#e6e0f0', ink: '#231c33', sub: '#3a3150', a1: '#7a5ea8', a2: '#cfc2e6' },
-  sand: { outer: '#f8f1e6', card: '#ecdfc8', ink: '#2a2118', sub: '#45392b', a1: '#9c6b30', a2: '#d9bf8f' },
-  night: { outer: '#161a24', card: '#212736', ink: '#f4efe6', sub: '#dcd5c9', a1: '#e9b872', a2: '#4a5670', dark: true },
+  cream: { bg1: '#fdf8f0', bg2: '#f3e6d0', ink: '#3b3128', a1: '#f6d9a8', a2: '#e3cfae' },
+  peach: { bg1: '#fff4ee', bg2: '#fcd9c8', ink: '#4a3029', a1: '#ffc7ad', a2: '#efc1aa' },
+  blush: { bg1: '#fff3f5', bg2: '#f6d6de', ink: '#4a2c35', a1: '#f7bccb', a2: '#e9c2cc' },
+  lavender: { bg1: '#f8f5fd', bg2: '#e2daf3', ink: '#352c4d', a1: '#d3c4f0', a2: '#d4cbe6' },
+  sky: { bg1: '#f3f8fd', bg2: '#d5e6f5', ink: '#24364b', a1: '#bcd8f2', a2: '#c6d6e6' },
+  mint: { bg1: '#f2fbf6', bg2: '#d2eee0', ink: '#21392e', a1: '#b9e6cf', a2: '#c3dccf' },
+  sage: { bg1: '#f5f7f0', bg2: '#dfe7d4', ink: '#2c3826', a1: '#cfdcbc', a2: '#ccd6bf' },
 };
-export const LAYOUTS = ['list', 'single', 'quote'];
-export const DECORS = ['none', 'frame', 'tape', 'sparkle'];
+export const LAYOUTS = ['showcase', 'hero', 'phone'];
+export const DECORS = ['glow', 'shelf', 'bokeh', 'none'];
 export const FONTS_KM = KHMER_FONTS; // heading fonts: scripts/khmer_fonts.mjs
 
 // Through the AI Manager on the GitHub runner (the site's firewall blocks GitHub servers).
@@ -79,91 +80,86 @@ async function dataUri(url, maxBytes = 8 * 1024 * 1024) {
   return img ? `data:${img.type};base64,${img.bytes.toString('base64')}` : null;
 }
 
-// The card's inner area (the outer page shows as a margin around it, like the reference post).
-const CARD = { top: 46, left: 46, right: W - 46, bottom: H - 64 };
-const INNER = { left: CARD.left + 70, right: CARD.right - 70 };
+const HEAD = { top: 70, height: 230 }; // the Khmer heading
+const STAGE_TOP = 330; // the covers start here
+const CX = W / 2;
 
-const tape = (decor, w) => (decor === 'tape' ? `<span class="tape" style="left:${Math.round(w / 2 - 55)}px"></span>` : '');
-const coverImg = (src, w, h, decor) => `<div class="cv" style="width:${w}px;height:${h}px"><img src="${src}">${tape(decor, w)}</div>`;
-// "Title by Author" like the reference (book titles on the site are in Latin script).
-const bookLine = (b = {}, fit) => `<div class="btitle" data-fit="${fit}">${esc(b.title || '')}${b.author ? ` <span class="by">by ${esc(b.author)}</span>` : ''}</div>`;
+// A cover with a soft shadow and a faint reflection below it (a book standing on a glossy shelf).
+const cover = (src, { x, y, w, h, rot = 0, z = 1, reflect = true }) => `<div class="abs cv" style="left:${Math.round(x)}px;top:${Math.round(y)}px;width:${w}px;height:${h}px;z-index:${z};transform:rotate(${rot}deg)">
+<img class="main" src="${src}">${reflect ? `<img class="refl" src="${src}">` : ''}</div>`;
 
-function decorHtml(decor, p) {
+function decorHtml(decor, p, floor) {
   switch (decor) {
-    case 'frame': return `<div class="abs" style="top:${CARD.top + 22}px;left:${CARD.left + 22}px;right:${W - CARD.right + 22}px;bottom:${H - CARD.bottom + 22}px;border:2px solid ${p.a1};opacity:.45;border-radius:6px"></div>`;
-    case 'sparkle': return [[92, 84, 30], [952, 96, 22], [960, 1210, 28], [96, 1226, 20]]
-      .map(([x, y, s]) => `<div class="abs" style="left:${x}px;top:${y}px;font-size:${s}px;color:${p.a1};opacity:.8">✦</div>`).join('');
+    case 'glow': return `<div class="abs" style="left:${CX - 540}px;top:${STAGE_TOP - 60}px;width:1080px;height:920px;border-radius:50%;background:radial-gradient(closest-side,#ffffff 0%,${p.a1}aa 50%,transparent 100%)"></div>`;
+    case 'shelf': return `<div class="abs" style="left:70px;right:70px;top:${floor}px;height:26px;border-radius:6px;background:${p.a2};box-shadow:0 18px 30px rgba(0,0,0,.10);z-index:0"></div>`;
+    case 'bokeh': return [[120, 400, 150], [940, 360, 190], [150, 1090, 120], [930, 1030, 160], [80, 760, 70], [1010, 700, 80]]
+      .map(([x, y, s]) => `<div class="abs" style="left:${x - s / 2}px;top:${y - s / 2}px;width:${s}px;height:${s}px;border-radius:50%;background:radial-gradient(circle,#ffffff 0%,${p.a1} 70%);opacity:.55;filter:blur(2px)"></div>`).join('')
+      + [[200, 270, 26], [860, 250, 20], [990, 1180, 24], [90, 1200, 18]].map(([x, y, s]) => `<div class="abs" style="left:${x}px;top:${y}px;font-size:${s}px;color:#ffffff;text-shadow:0 0 8px ${p.a1}">✦</div>`).join('');
     default: return '';
   }
 }
 
-// ---------- layouts ----------
-const TOP = 300; // content starts under the heading
+// ---------- layouts: the covers are the poster. Each returns { floor, html } ----------
 const LAYOUT = {
-  // 1-3 rows: cover on the left, "Title by Author" and a short note on the right (the reference post).
-  list(j, c) {
-    const n = Math.max(Math.min(c.length, 3), 1), area = CARD.bottom - 60 - TOP, rowH = Math.floor(area / n);
-    const h = Math.min(rowH - 50, 400), w = Math.round(h / 1.5);
-    return c.slice(0, 3).map((s, i) => {
-      const b = j.books[i] || {};
-      return `<div class="abs lrow" style="top:${TOP + i * rowH}px;height:${rowH - 40}px">${coverImg(s, w, h, j.decor)}
-<div class="ltext">${bookLine(b, 130)}${b.note ? `<div class="note" data-fit="${Math.max(rowH - 190, 120)}">${esc(b.note)}</div>` : ''}</div></div>`;
-    }).join('');
+  // 2-3 covers in a row; with 3 the first is the biggest and in front.
+  showcase(c) {
+    if (c.length === 1) return LAYOUT.hero(c);
+    const three = c.length >= 3;
+    const bigH = 720, bigW = Math.round(bigH / 1.5), smH = three ? 520 : 630, smW = Math.round(smH / 1.5);
+    const floor = three ? STAGE_TOP + 40 + bigH : STAGE_TOP + 90 + smH;
+    if (!three) return { floor, html: [cover(c[0], { x: CX - smW - 22, y: floor - smH, w: smW, h: smH, rot: -2, z: 2 }), cover(c[1], { x: CX + 22, y: floor - smH, w: smW, h: smH, rot: 2, z: 2 })].join('') };
+    return { floor, html: [
+      cover(c[1], { x: CX - bigW / 2 - smW + 110, y: floor - smH, w: smW, h: smH, rot: -4, z: 1 }),
+      cover(c[2], { x: CX + bigW / 2 - 110, y: floor - smH, w: smW, h: smH, rot: 4, z: 1 }),
+      cover(c[0], { x: CX - bigW / 2, y: floor - bigH, w: bigW, h: bigH, z: 3 }),
+    ].join('') };
   },
-  // One book in focus: a large cover, its title and a longer note below.
-  single(j, c) {
-    const b = j.books[0] || {};
-    return `<div class="abs" style="top:${TOP}px;left:0;right:0;display:flex;justify-content:center">${c[0] ? coverImg(c[0], 400, 600, j.decor) : ''}</div>
-<div class="abs col center" style="top:${TOP + 650}px;left:${INNER.left}px;right:${W - INNER.right}px">${bookLine(b, 110)}${b.note ? `<div class="note" data-fit="150">${esc(b.note)}</div>` : ''}</div>`;
+  // One large cover in focus.
+  hero(c) {
+    const h = 740, w = Math.round(h / 1.5), floor = STAGE_TOP + 40 + h;
+    return { floor, html: cover(c[0], { x: CX - w / 2, y: floor - h, w, h, z: 2 }) };
   },
-  // A motivational line in large type; up to 3 small covers below as "read next".
-  quote(j, c) {
-    const covers = c.slice(0, 3);
-    const qBottom = covers.length ? 860 : CARD.bottom - 120;
-    const row = covers.map(s => coverImg(s, 170, 255, j.decor)).join('');
-    return `<div class="abs col center" style="top:${TOP - 20}px;left:${INNER.left}px;right:${W - INNER.right}px;height:${qBottom - TOP}px;justify-content:center">
-<div class="qmark">“</div><div class="quote" data-fit="${qBottom - TOP - 110}">${esc(j.quote || '')}</div></div>
-${covers.length ? `<div class="abs" style="top:${qBottom + 40}px;left:0;right:0;display:flex;justify-content:center;gap:48px">${row}</div>` : ''}`;
+  // A phone / e-reader showing the first cover ("read on your phone"), other covers leaning on each side.
+  phone(c) {
+    const pw = 460, ph = 900, px = CX - pw / 2, py = STAGE_TOP, floor = py + ph;
+    const sw = 320, sh = 480, sy = floor - sh;
+    const side = c.slice(1, 3).map((s, i) => cover(s, { x: i ? px + pw - 80 : px - sw + 80, y: sy, w: sw, h: sh, rot: i ? 6 : -6, z: 3, reflect: false })).join('');
+    return { floor, html: `<div class="abs phone" style="left:${px}px;top:${py}px;width:${pw}px;height:${ph}px"><div class="screen"><img src="${c[0]}"></div></div>${side}` };
   },
 };
 
 export function posterHtml(job) {
   const p = POSTER_PALETTES[job.palette] || POSTER_PALETTES.cream;
-  const f = fontOf(job.font, 'fasthand'), bf = bodyFontOf(job.body_font);
+  const f = fontOf(job.font, 'kantumruy');
   const covers = (job.covers || []).filter(Boolean);
-  let layout = LAYOUT[job.layout] ? job.layout : 'list';
-  if (layout !== 'quote' && !covers.length) layout = 'quote'; // no cover could be loaded
-  const j = { ...job, books: job.books || [], decor: DECORS.includes(job.decor) ? job.decor : 'none' };
-  if (layout === 'quote' && !j.quote) j.quote = j.books.find(b => b.note)?.note || '';
+  const layout = LAYOUT[job.layout] ? job.layout : 'showcase';
+  const decor = DECORS.includes(job.decor) ? job.decor : 'glow';
+  // No cover could be loaded: the heading alone, centred.
+  const stage = covers.length ? LAYOUT[layout](covers) : { floor: H - 200, html: '' };
+  const headBox = covers.length ? { top: HEAD.top, height: HEAD.height } : { top: H / 2 - 260, height: 520 };
   const sig = `<div class="abs sig">${job.logo ? `<img src="${job.logo}">` : ''}<span>BookShare<b>KH</b></span></div>`;
   return `<!doctype html><html lang="km"><head><meta charset="utf-8"><style>
-${fontFaces([job.font, job.body_font, 'notoserif', 'fasthand'])}
+${fontFaces([job.font])}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{width:${W}px;height:${H}px;overflow:hidden}
-body{font-family:'${bf.family}','Noto Sans Khmer',sans-serif;color:${p.ink};position:relative;background:${p.outer}}
-.abs{position:absolute}.col{display:flex;flex-direction:column}.center{align-items:center;text-align:center}
-.card{top:${CARD.top}px;left:${CARD.left}px;width:${CARD.right - CARD.left}px;height:${CARD.bottom - CARD.top}px;background:${p.card}}
-h1{position:absolute;top:${CARD.top + 70}px;left:${INNER.left}px;right:${W - INNER.right}px;height:170px;display:flex;align-items:center;justify-content:center;text-align:center;
-  font-family:'${f.family}','Noto Sans Khmer',sans-serif;font-weight:400;font-size:${Math.round(84 * f.scale)}px;line-height:1.45;color:${p.ink}}
-.lrow{left:${INNER.left - 10}px;right:${W - INNER.right}px;display:flex;align-items:center;gap:56px}
-.cv{position:relative;flex:none}
-.cv img{width:100%;height:100%;object-fit:cover;display:block;box-shadow:0 10px 26px rgba(0,0,0,${p.dark ? '.5' : '.22'}),0 2px 6px rgba(0,0,0,.12)}
-.tape{position:absolute;top:-18px;width:110px;height:36px;background:${p.a2};opacity:.85;transform:rotate(-4deg)}
-.ltext{flex:1;min-width:0}
-.btitle{font-family:'Noto Serif Khmer','Hanuman',Georgia,'DejaVu Serif',serif;font-weight:700;font-size:42px;line-height:1.3;color:${p.ink};overflow:hidden}
-.by{font-weight:600}
-.note{font-size:38px;line-height:1.7;color:${p.sub};margin-top:14px;overflow:hidden}
-.center .note{font-size:36px}
-.qmark{font-family:Georgia,'DejaVu Serif',serif;font-size:170px;line-height:.8;height:96px;color:${p.a1};opacity:.85}
-.quote{font-family:'${f.family}','Noto Sans Khmer',sans-serif;font-size:${Math.round(66 * f.scale)}px;line-height:1.65;color:${p.ink};overflow:hidden;width:100%}
-.sig{right:${W - CARD.right + 6}px;bottom:14px;display:flex;align-items:center;gap:10px;opacity:.6;font-family:'Poppins';font-weight:600;font-size:24px;color:${p.dark ? '#ffffff' : p.ink}}
-.sig img{width:34px;height:34px;object-fit:contain;border-radius:8px;background:#fff;padding:3px}
-.sig b{color:${p.a1};font-weight:800}
+body{font-family:'Noto Sans Khmer',sans-serif;color:${p.ink};position:relative;background:linear-gradient(170deg,${p.bg1} 0%,${p.bg1} 30%,${p.bg2} 100%)}
+.abs{position:absolute}
+h1{position:absolute;left:90px;right:90px;top:${headBox.top}px;height:${headBox.height}px;display:flex;align-items:center;justify-content:center;text-align:center;z-index:5;
+  font-family:'${f.family}','Noto Sans Khmer',sans-serif;font-weight:400;font-size:${Math.round((covers.length ? 80 : 96) * f.scale)}px;line-height:1.5;color:${p.ink}}
+.cv img.main{width:100%;height:100%;object-fit:cover;display:block;border-radius:6px;box-shadow:0 30px 50px rgba(40,30,20,.22),0 8px 16px rgba(40,30,20,.14)}
+.cv img.refl{position:absolute;left:0;top:100%;margin-top:6px;width:100%;height:100%;object-fit:cover;border-radius:6px;transform:scaleY(-1);opacity:.18;
+  -webkit-mask-image:linear-gradient(to top,#000 0%,transparent 20%);mask-image:linear-gradient(to top,#000 0%,transparent 20%)}
+.phone{z-index:4;border-radius:56px;background:#1e1e24;padding:18px;box-shadow:0 40px 70px rgba(40,30,20,.28),inset 0 0 0 3px ${p.a2}}
+.phone .screen{width:100%;height:100%;border-radius:40px;overflow:hidden;background:#fff}
+.phone .screen img{width:100%;height:100%;object-fit:cover;display:block}
+.phone::before{content:'';position:absolute;top:30px;left:50%;width:110px;height:26px;margin-left:-55px;border-radius:14px;background:#1e1e24;z-index:2}
+.sig{right:56px;bottom:40px;display:flex;align-items:center;gap:10px;opacity:.7;font-family:'Poppins';font-weight:600;font-size:26px;color:${p.ink};z-index:6}
+.sig img{width:38px;height:38px;object-fit:contain;border-radius:9px;background:#fff;padding:3px}
+.sig b{font-weight:800}
 </style></head><body>
-<div class="abs card"></div>
-${decorHtml(j.decor, p)}
-<h1 data-fit="170">${esc(job.heading || '')}</h1>
-${LAYOUT[layout](j, covers)}
+${decorHtml(decor, p, stage.floor)}
+<h1 data-fit="${headBox.height}">${esc(job.heading || '')}</h1>
+${stage.html}
 ${sig}
 ${FIT_SCRIPT}
 </body></html>`;
@@ -172,17 +168,14 @@ ${FIT_SCRIPT}
 export async function renderPoster(job, outFile) {
   const work = join(dirname(outFile), 'poster-work');
   mkdirSync(work, { recursive: true });
-  // Each book stays with its cover: a book whose cover could not be loaded is dropped with it.
-  const covers = [], books = [];
-  for (const [i, url] of (job.covers || []).slice(0, 3).entries()) {
-    const d = await dataUri(url);
-    if (d) { covers.push(d); books.push(job.books?.[i] || {}); }
-  }
+  // A cover that could not be loaded is left out.
+  const covers = [];
+  for (const url of (job.covers || []).slice(0, 3)) { const d = await dataUri(url); if (d) covers.push(d); }
   const logo = await dataUri(job.logo_url || 'https://booksharekh.com/dist/img/logo/logo.png', 4 * 1024 * 1024);
   const html = join(work, 'poster.html');
-  writeFileSync(html, posterHtml({ ...job, covers, logo, books }), 'utf8');
+  writeFileSync(html, posterHtml({ ...job, covers, logo }), 'utf8');
   screenshot(html, outFile, W, H);
-  return { file: outFile, covers: covers.length, logo: Boolean(logo), layout: job.layout || 'list' };
+  return { file: outFile, covers: covers.length, logo: Boolean(logo), layout: job.layout || 'showcase' };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
